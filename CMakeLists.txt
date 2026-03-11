@@ -7,6 +7,22 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# ── 默认 Release ──────────────────────────────────────────────
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# ── Release 优化 / Debug 符号 ─────────────────────────────────
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(MSVC)
+        set(CMAKE_CXX_FLAGS_RELEASE "/O2 /GL /DNDEBUG")
+    else()
+        set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
+        # 保留最小调试信息便于崩溃报告
+        add_compile_options(-g1)
+    endif()
+endif()
+
 # 优先使用 Qt6，回退到 Qt5（跨平台兼容）
 find_package(Qt6 QUIET COMPONENTS Core Gui Widgets Network)
 if(NOT Qt6_FOUND)
@@ -73,28 +89,58 @@ endif()
 
 target_include_directories(openclaw PRIVATE src)
 
-# Windows: 无控制台窗口 + 管理员提权
+# ── 编译定义：嵌入版本号 ──────────────────────────────────────
+target_compile_definitions(openclaw PRIVATE
+    OC_VERSION="${PROJECT_VERSION}"
+    OC_APP_NAME="openclaw"
+)
+
+# ── Windows：无控制台窗口 + 管理员提权 ────────────────────────
 if(WIN32)
     set_target_properties(openclaw PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_sources(openclaw PRIVATE resources/windows/openclaw.rc)
     if(MSVC)
-        target_sources(openclaw PRIVATE resources/windows/openclaw.rc)
         set_target_properties(openclaw PROPERTIES
             LINK_FLAGS "/MANIFESTUAC:\"level='requireAdministrator' uiAccess='false'\""
         )
-    elseif(MINGW)
-        target_sources(openclaw PRIVATE resources/windows/openclaw.rc)
+    endif()
+    # Qt6 需要额外链接
+    if(QT_VERSION_MAJOR EQUAL 6)
+        target_link_libraries(openclaw PRIVATE Qt6::EntryPointPrivate)
     endif()
 endif()
 
-# Linux/macOS: RPATH
+# ── Linux: 去除调试符号（Release）/ RPATH ─────────────────────
 if(UNIX AND NOT APPLE)
     set_target_properties(openclaw PROPERTIES
         INSTALL_RPATH "$ORIGIN/../lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        # 拆分调试符号到独立 .debug 文件
+        add_custom_command(TARGET openclaw POST_BUILD
+            COMMAND ${CMAKE_OBJCOPY} --only-keep-debug
+                $<TARGET_FILE:openclaw>
+                $<TARGET_FILE:openclaw>.debug
+            COMMAND ${CMAKE_STRIP} --strip-debug --strip-unneeded
+                $<TARGET_FILE:openclaw>
+            COMMAND ${CMAKE_OBJCOPY}
+                --add-gnu-debuglink=$<TARGET_FILE:openclaw>.debug
+                $<TARGET_FILE:openclaw>
+            COMMENT "剥离调试信息…"
+        )
+    endif()
 endif()
 
 install(TARGETS openclaw
-    BUNDLE DESTINATION .
+    BUNDLE  DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# ── 便捷目标 ─────────────────────────────────────────────────
+add_custom_target(appimage
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/build_appimage.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS openclaw
+    COMMENT "打包 AppImage…"
 )

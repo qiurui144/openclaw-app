@@ -3,6 +3,8 @@
 #include <QString>
 #include <QStringList>
 #include <QProcess>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 
 struct DeployConfig {
     QString installPath;
@@ -40,6 +42,9 @@ public:
     // 获取服务 URL
     QString dashboardUrl() const;
 
+    // 写已有配置位置记录（供卸载/更新使用）
+    static QString installRecordPath();
+
 signals:
     void progressChanged(int percent, const QString &message);
     void deployed();
@@ -48,13 +53,14 @@ signals:
 private:
     bool extractBinaries();
     bool writeConfig();
+    bool writeInstallRecord();
     bool installSystemService();
     bool startService();
     bool writePlatformConfig();
+    bool hasBundledBinaries() const;
 
-    QString platformServiceExe() const;
-    QString serviceUnitPath() const;   // Linux only
+    QString bundledBinaryPath(const QString &name) const;
 
-    DeployConfig m_config;
-    QProcess    *m_proc = nullptr;
+    DeployConfig            m_config;
+    QProcess               *m_proc    = nullptr;
 };

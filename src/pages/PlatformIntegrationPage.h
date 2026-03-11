@@ -2,13 +2,13 @@
 #include <QWizardPage>
 #include <QCheckBox>
 #include <QLineEdit>
-#include <QStackedWidget>
 
 class PlatformIntegrationPage : public QWizardPage {
     Q_OBJECT
 public:
     explicit PlatformIntegrationPage(QWidget *parent = nullptr);
     void initializePage() override;
+    bool validatePage() override;
     bool isComplete() const override { return true; }  // 平台集成为可选步骤
 
 private:
@@ -30,4 +30,6 @@ private:
                         const QString &fieldEnable,
                         const QString &fieldWebhook,
                         PlatformEntry &entry);
+
+    bool validateEntry(const PlatformEntry &entry, const QString &platformName) const;
 };

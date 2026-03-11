@@ -1,0 +1,40 @@
+# ── Build artifacts ──────────────────────────────────────────
+build/
+dist/
+*.AppImage
+
+# ── Qt/CMake generated ────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cbp
+.qmake.stash
+*.pro.user
+
+# ── Compiled object files ────────────────────────────────────
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+*.debug
+
+# ── Binary embeds (to avoid committing large blobs) ──────────
+resources/binaries/linux/openclaw-server
+resources/binaries/linux/openclaw-config
+resources/binaries/windows/openclaw-server.exe
+resources/binaries/windows/openclaw-config.exe
+
+# ── IDE ───────────────────────────────────────────────────────
+.idea/
+.vscode/settings.json
+*.swp
+*~
+.DS_Store
+
+# ── Generated NSIS / linuxdeploy tools ────────────────────────
+scripts/toolchain-mingw64.cmake
+scripts/openclaw.nsi
+*.AppImage

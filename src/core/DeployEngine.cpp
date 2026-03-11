@@ -6,10 +6,12 @@
 #include <QTextStream>
 #include <QProcess>
 #include <QCoreApplication>
-#include <QThread>
+#include <QStandardPaths>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QTimer>
+#include <QDateTime>
 
 #ifdef Q_OS_WIN
 #  include <windows.h>
@@ -56,6 +58,7 @@ void DeployEngine::startDeploy()
                     emit deployFailed(tr("写入平台集成配置失败"));
                     return;
                 }
+                writeInstallRecord();  // 写安装记录（非致命）
                 emit progressChanged(60, tr("注册系统服务…"));
 
                 QTimer::singleShot(600, this, [this] {
@@ -88,6 +91,28 @@ void DeployEngine::startDeploy()
 }
 
 // ── 提取内嵌二进制 ─────────────────────────────────────────────────────────
+bool DeployEngine::hasBundledBinaries() const
+{
+#if defined(Q_OS_LINUX)
+    return QFile::exists(":/binaries/linux/openclaw-server");
+#elif defined(Q_OS_WIN)
+    return QFile::exists(":/binaries/windows/openclaw-server.exe");
+#else
+    return false;
+#endif
+}
+
+QString DeployEngine::bundledBinaryPath(const QString &name) const
+{
+#if defined(Q_OS_LINUX)
+    return ":/binaries/linux/" + name;
+#elif defined(Q_OS_WIN)
+    return ":/binaries/windows/" + name + ".exe";
+#else
+    return QString();
+#endif
+}
+
 bool DeployEngine::extractBinaries()
 {
     QDir d(m_config.installPath);
@@ -95,40 +120,41 @@ bool DeployEngine::extractBinaries()
         return false;
 
 #if defined(Q_OS_LINUX)
-    const QStringList files = {
-        "linux/openclaw-server",
-        "linux/openclaw-config",
-    };
+    const QStringList entries = { "openclaw-server", "openclaw-config" };
 #elif defined(Q_OS_WIN)
-    const QStringList files = {
-        "windows/openclaw-server.exe",
-        "windows/openclaw-config.exe",
-    };
+    const QStringList entries = { "openclaw-server.exe", "openclaw-config.exe" };
 #else
-    const QStringList files;
+    const QStringList entries;
 #endif
 
-    for (const QString &rel : files) {
-        const QString srcPath = ":/binaries/" + rel;
+    bool hasAny = false;
+    for (const QString &name : entries) {
+        const QString srcPath = bundledBinaryPath(
+            name.endsWith(".exe") ? name.chopped(4) : name);
         QFile src(srcPath);
         if (!src.exists()) {
-            // 二进制占位文件不存在时写一个标记文件（便于开发阶段调试）
-            QFile mark(d.filePath(QFileInfo(rel).fileName() + ".placeholder"));
-            mark.open(QIODevice::WriteOnly);
-            mark.write("# OpenClaw binary placeholder\n");
-            mark.close();
+            // 无内嵌二进制时，写placeholder（开发阶段/CI占位）
+            QFile mark(d.filePath(name + ".placeholder"));
+            if (mark.open(QIODevice::WriteOnly))
+                mark.write("# OpenClaw binary placeholder – replace with real binary\n");
             continue;
         }
-        const QString dstPath = d.filePath(QFileInfo(rel).fileName());
+
+        hasAny = true;
+        const QString dstPath = d.filePath(name);
         if (QFile::exists(dstPath))
             QFile::remove(dstPath);
         if (!src.open(QIODevice::ReadOnly))
             return false;
+
         QFile dst(dstPath);
         if (!dst.open(QIODevice::WriteOnly))
             return false;
+
+        // 分块写入，避免大文件一次性占用大量内存
+        constexpr int kChunk = 2 * 1024 * 1024;  // 2 MB
         while (!src.atEnd())
-            dst.write(src.read(1024 * 1024));
+            dst.write(src.read(kChunk));
         src.close();
         dst.close();
 
@@ -139,6 +165,9 @@ bool DeployEngine::extractBinaries()
             QFileDevice::ReadOther | QFileDevice::ExeOther);
 #endif
     }
+
+    // 如果一个真实二进制都没有，仅是占位，部署也算通过（开发模式）
+    Q_UNUSED(hasAny)
     return true;
 }
 
@@ -146,11 +175,12 @@ bool DeployEngine::extractBinaries()
 bool DeployEngine::writeConfig()
 {
     QJsonObject cfg;
-    cfg["port"]          = m_config.servicePort;
+    cfg["port"]           = m_config.servicePort;
     cfg["admin_password"] = m_config.adminPassword;
-    cfg["domain"]        = m_config.domainName;
-    cfg["install_path"]  = m_config.installPath;
-    cfg["version"]       = QCoreApplication::applicationVersion();
+    cfg["domain"]         = m_config.domainName;
+    cfg["install_path"]   = m_config.installPath;
+    cfg["version"]        = QCoreApplication::applicationVersion();
+    cfg["deployed_at"]    = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
 
     QJsonDocument doc(cfg);
     QFile f(m_config.installPath + "/openclaw.json");
@@ -160,18 +190,55 @@ bool DeployEngine::writeConfig()
     return true;
 }
 
+// ── 写安装记录（供后续更新/卸载定位） ────────────────────────────────────────
+bool DeployEngine::writeInstallRecord()
+{
+    const QString recordDir = QStandardPaths::writableLocation(
+        QStandardPaths::AppDataLocation);
+    QDir().mkpath(recordDir);
+
+    QJsonObject rec;
+    rec["install_path"]  = m_config.installPath;
+    rec["version"]       = QCoreApplication::applicationVersion();
+    rec["installed_at"]  = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    rec["service_port"]  = m_config.servicePort;
+
+    QFile f(recordDir + "/install_record.json");
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
+        return false;
+    f.write(QJsonDocument(rec).toJson(QJsonDocument::Indented));
+    return true;
+}
+
+QString DeployEngine::installRecordPath()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+         + "/install_record.json";
+}
+
 // ── 写入平台集成配置 ─────────────────────────────────────────────────────────
 bool DeployEngine::writePlatformConfig()
 {
     QJsonObject platforms;
-    if (m_config.enableWx)
+    QJsonArray  enabled;
+
+    if (m_config.enableWx && !m_config.wxWebhook.isEmpty()) {
         platforms["wechat_work_webhook"] = m_config.wxWebhook;
-    if (m_config.enableQq)
+        enabled.append("wechat_work");
+    }
+    if (m_config.enableQq && !m_config.qqWebhook.isEmpty()) {
         platforms["qq_work_webhook"]     = m_config.qqWebhook;
-    if (m_config.enableDt)
+        enabled.append("qq_work");
+    }
+    if (m_config.enableDt && !m_config.dtWebhook.isEmpty()) {
         platforms["dingtalk_webhook"]    = m_config.dtWebhook;
-    if (m_config.enableFs)
+        enabled.append("dingtalk");
+    }
+    if (m_config.enableFs && !m_config.fsWebhook.isEmpty()) {
         platforms["feishu_webhook"]      = m_config.fsWebhook;
+        enabled.append("feishu");
+    }
+    platforms["enabled_platforms"] = enabled;
 
     QJsonDocument doc(platforms);
     QFile f(m_config.installPath + "/platforms.json");
