@@ -1,0 +1,25 @@
+# ninja log v7
+1	353	1773236652968001448	openclaw_autogen/timestamp	27f6c1fff7217a09
+1	353	1773236652968001448	openclaw_autogen/mocs_compilation.cpp	27f6c1fff7217a09
+1	353	1773236652968001448	/data/openclaw/build/debug/openclaw_autogen/timestamp	27f6c1fff7217a09
+1	353	1773236652968001448	/data/openclaw/build/debug/openclaw_autogen/mocs_compilation.cpp	27f6c1fff7217a09
+353	371	1773236652996001166	openclaw_autogen/3YJK5W5UP7/qrc_resources.cpp	874b15247ab4e32d
+353	371	1773236652996001166	/data/openclaw/build/debug/openclaw_autogen/3YJK5W5UP7/qrc_resources.cpp	874b15247ab4e32d
+373	393	1773236653001631379	CMakeFiles/openclaw.dir/openclaw_autogen/3YJK5W5UP7/qrc_resources.cpp.o	958a73011d24d7f
+373	1478	1773236653001377812	CMakeFiles/openclaw.dir/src/pages/FinishPage.cpp.o	ec2bfffb440b3f36
+372	1479	1773236653000274054	CMakeFiles/openclaw.dir/src/pages/WelcomePage.cpp.o	e10b58521597fe91
+372	1622	1773236653000148913	CMakeFiles/openclaw.dir/src/core/SystemCheck.cpp.o	2d1d2b3545c29a1d
+373	1636	1773236653001035511	CMakeFiles/openclaw.dir/src/pages/PlatformIntegrationPage.cpp.o	b931167e958c6954
+372	1721	1773236653000582943	CMakeFiles/openclaw.dir/src/pages/InstallConfigPage.cpp.o	76f5d953b883e356
+372	1742	1773236653000019990	CMakeFiles/openclaw.dir/src/core/DeployEngine.cpp.o	42bb6759e91cfe71
+371	2014	1773236652999605340	CMakeFiles/openclaw.dir/src/main.cpp.o	6f9e2570cb789da7
+371	2110	1773236652998001145	CMakeFiles/openclaw.dir/openclaw_autogen/mocs_compilation.cpp.o	c87d24fc5e66f95b
+373	2286	1773236653001278927	CMakeFiles/openclaw.dir/src/pages/DeploymentPage.cpp.o	1d9d27ced98d67e3
+372	2515	1773236653000852866	CMakeFiles/openclaw.dir/src/pages/ServiceConfigPage.cpp.o	af5055fd12f3ce0c
+371	2923	1773236652999758650	CMakeFiles/openclaw.dir/src/DeployWizard.cpp.o	46326e676ba6374a
+3	48	1773236678271743970	openclaw_autogen/timestamp	27f6c1fff7217a09
+3	48	1773236678271743970	openclaw_autogen/mocs_compilation.cpp	27f6c1fff7217a09
+3	48	1773236678271743970	/data/openclaw/build/debug/openclaw_autogen/timestamp	27f6c1fff7217a09
+3	48	1773236678271743970	/data/openclaw/build/debug/openclaw_autogen/mocs_compilation.cpp	27f6c1fff7217a09
+48	2074	1773236678316743510	CMakeFiles/openclaw.dir/src/pages/SystemCheckPage.cpp.o	7bef2d9ea2fe0bd9
+2074	2441	1773236680342722756	openclaw	f70358338f02525

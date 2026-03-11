@@ -1,0 +1,22 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+<qresource prefix="/">
+    <file>styles/wizard.qss</file>
+    <file>icons/app.svg</file>
+</qresource>
+<!-- 
+    内置二进制文件（发布时放置到对应目录后取消注释）：
+
+    Linux 二进制：
+    <qresource prefix="/binaries">
+        <file alias="linux/openclaw-server">binaries/linux/openclaw-server</file>
+        <file alias="linux/openclaw-config">binaries/linux/openclaw-config</file>
+    </qresource>
+
+    Windows 二进制：
+    <qresource prefix="/binaries">
+        <file alias="windows/openclaw-server.exe">binaries/windows/openclaw-server.exe</file>
+        <file alias="windows/openclaw-config.exe">binaries/windows/openclaw-config.exe</file>
+    </qresource>
+-->
+</RCC>

@@ -1,0 +1,38 @@
+; Windows 资源文件
+; 用于嵌入版本信息和应用程序图标
+
+#include <winresrc.h>
+
+IDI_ICON1 ICON "openclaw.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK  0x3fL
+FILEFLAGS      0x0L
+FILEOS         VOS__WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404b0"
+    BEGIN
+      VALUE "CompanyName",      "OpenClaw\0"
+      VALUE "FileDescription",  "OpenClaw 一键部署向导\0"
+      VALUE "FileVersion",      "1.0.0.0\0"
+      VALUE "InternalName",     "openclaw\0"
+      VALUE "LegalCopyright",   "Copyright (C) 2026 OpenClaw\0"
+      VALUE "OriginalFilename", "openclaw.exe\0"
+      VALUE "ProductName",      "OpenClaw Deployer\0"
+      VALUE "ProductVersion",   "1.0.0.0\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0804, 1200
+  END
+END
+
+/* 请求管理员权限清单 */
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "openclaw.manifest"
