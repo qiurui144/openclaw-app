@@ -42,18 +42,18 @@ cat \
   > "$BUNDLE_OUT"
 
 # Step 4: 追加内嵌资源（base64 编码）
-echo "" >> "$BUNDLE_OUT"
-echo "__BUNDLE_DATA__" >> "$BUNDLE_OUT"
-
 echo "编码 Node.js 二进制（$(wc -c < "$NODE_BIN") bytes）…"
-echo "__BUNDLE_node__" >> "$BUNDLE_OUT"
-base64 "$NODE_BIN" >> "$BUNDLE_OUT"
-echo "__END_BUNDLE_node__" >> "$BUNDLE_OUT"
-
 echo "编码 openclaw.tgz（$(wc -c < "$OC_TGZ") bytes）…"
-echo "__BUNDLE_openclaw.tgz__" >> "$BUNDLE_OUT"
-base64 "$OC_TGZ" >> "$BUNDLE_OUT"
-echo "__END_BUNDLE_openclaw.tgz__" >> "$BUNDLE_OUT"
+{
+  echo ""
+  echo "__BUNDLE_DATA__"
+  echo "__BUNDLE_node__"
+  base64 "$NODE_BIN"
+  echo "__END_BUNDLE_node__"
+  echo "__BUNDLE_openclaw.tgz__"
+  base64 "$OC_TGZ"
+  echo "__END_BUNDLE_openclaw.tgz__"
+} >> "$BUNDLE_OUT"
 
 chmod +x "$BUNDLE_OUT"
 

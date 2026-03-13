@@ -233,6 +233,7 @@ main() {
 
   # 系统环境检查（bundled 模式下函数已内嵌，跳过 source）
   if ! declare -f check_macos_version > /dev/null 2>&1; then
+    # shellcheck source=detect.sh
     source "$(dirname "$0")/detect.sh" || fatal "缺少 detect.sh"
   fi
   run_system_checks || fatal "系统检查失败，无法继续安装"
@@ -242,12 +243,17 @@ main() {
   if [[ "$mode" == "online" ]]; then
     # bundled 模式下函数已内嵌，跳过 source
     if ! declare -f clash_disclaimer > /dev/null 2>&1; then
+      # shellcheck source=clash.sh
       source "$(dirname "$0")/clash.sh" || fatal "缺少 clash.sh"
     fi
     if clash_disclaimer; then
       read -rp "请输入订阅链接: " sub_url
       clash_start "$sub_url" || { warn "代理启动失败，将直连下载"; use_clash=no; }
-      clash_test && { clash_export_env; use_clash=yes; } || warn "代理测试失败，将直连下载"
+      if clash_test; then
+        clash_export_env; use_clash=yes
+      else
+        warn "代理测试失败，将直连下载"
+      fi
     fi
   fi
 
@@ -269,10 +275,11 @@ main() {
   if [[ "${INSTALL_SERVICE}" == "yes" ]]; then
     # bundled 模式下函数已内嵌，跳过 source
     if ! declare -f generate_plist > /dev/null 2>&1; then
+      # shellcheck source=service.sh
       source "$(dirname "$0")/service.sh" || fatal "缺少 service.sh"
     fi
-    NODE_BIN="$INSTALL_PATH/node/node"
-    OPENCLAW_SCRIPT="$INSTALL_PATH/openclaw_pkg/index.js"
+    export NODE_BIN="$INSTALL_PATH/node/node"
+    export OPENCLAW_SCRIPT="$INSTALL_PATH/openclaw_pkg/index.js"
     install_service
     wait_for_service "$SERVICE_PORT" 30 || warn "服务未能及时启动，请手动检查"
   fi
