@@ -99,6 +99,31 @@ async fn apply_openclaw_update(
 }
 
 #[tauri::command]
+fn load_session() -> Option<session_state::SessionState> {
+    session_state::load()
+}
+
+#[tauri::command]
+fn clear_session(install_path: Option<String>) -> Result<(), String> {
+    session_state::clear(install_path.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_platform_config(
+    install_path: String,
+    platforms: Vec<platform_config::PlatformEntry>,
+) -> Result<(), String> {
+    platform_config::write_platform_config(&install_path, &platforms)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_platform_doc_url(platform: platform_config::Platform) -> String {
+    platform.doc_url().to_string()
+}
+
+#[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     open::that(&url).map_err(|e| e.to_string())
 }
@@ -138,6 +163,10 @@ fn main() {
             update_skills,
             check_openclaw_update,
             apply_openclaw_update,
+            load_session,
+            clear_session,
+            write_platform_config,
+            get_platform_doc_url,
             open_url,
             read_deploy_meta,
             get_default_install_path

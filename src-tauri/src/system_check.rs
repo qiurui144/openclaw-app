@@ -90,6 +90,7 @@ fn check_os_version() -> CheckItem {
 
 fn check_disk_space() -> CheckItem {
     let path = dirs::home_dir()
+        .filter(|p| p.exists())
         .unwrap_or_else(|| std::path::PathBuf::from("/"));
 
     let available_mb: u64 = {
