@@ -1,0 +1,30 @@
+{
+  "productName": "OpenClaw",
+  "version": "1.0.0",
+  "identifier": "io.openclaw.wizard",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenClaw 部署向导",
+        "width": 860,
+        "height": 620,
+        "resizable": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["../resources/icons/app.svg"]
+  }
+}

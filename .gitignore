@@ -43,3 +43,8 @@ scripts/toolchain-mingw64.cmake
 scripts/openclaw.nsi
 *.AppImage
 .worktrees/
+
+# ── Tauri / Node ──────────────────────────────────────────────
+src-tauri/target/
+src-tauri/gen/
+node_modules/
