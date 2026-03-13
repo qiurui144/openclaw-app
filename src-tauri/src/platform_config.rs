@@ -45,12 +45,23 @@ pub fn write_platform_config(
     install_path: &str,
     platforms: &[PlatformEntry],
 ) -> Result<()> {
-    if platforms.is_empty() { return Ok(()); }
+    write_platform_config_to(config_dir(), install_path, platforms)
+}
 
-    let config_path = dirs::home_dir()
+fn config_dir() -> PathBuf {
+    dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".openclaw")
-        .join("openclaw.json");
+}
+
+fn write_platform_config_to(
+    config_dir: PathBuf,
+    _install_path: &str,
+    platforms: &[PlatformEntry],
+) -> Result<()> {
+    if platforms.is_empty() { return Ok(()); }
+
+    let config_path = config_dir.join("openclaw.json");
 
     let mut config: serde_json::Value = if config_path.exists() {
         let data = std::fs::read_to_string(&config_path)?;
@@ -73,7 +84,6 @@ pub fn write_platform_config(
     }
 
     config["channels"] = serde_json::Value::Object(channels_map);
-    let _ = install_path;
 
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -85,20 +95,12 @@ pub fn write_platform_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
-    use std::sync::Mutex;
 
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
-
-    fn with_temp_home<F: FnOnce()>(f: F) {
-        let _guard = HOME_LOCK.lock().unwrap();
-        let tmp = env::temp_dir()
+    fn make_temp_dir() -> PathBuf {
+        let tmp = std::env::temp_dir()
             .join(format!("oc_pf_test_{}_{:?}", std::process::id(), std::thread::current().id()));
         std::fs::create_dir_all(&tmp).unwrap();
-        #[cfg(unix)]
-        env::set_var("HOME", &tmp);
-        f();
-        std::fs::remove_dir_all(&tmp).ok();
+        tmp
     }
 
     #[test]
@@ -119,36 +121,36 @@ mod tests {
 
     #[test]
     fn test_write_platform_config_creates_channels() {
-        with_temp_home(|| {
-            let dir = dirs::home_dir().unwrap().join(".openclaw");
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
-                dir.join("openclaw.json"),
-                r#"{"gateway":{"port":18789}}"#
-            ).unwrap();
+        let tmp = make_temp_dir();
+        let config_dir = tmp.join(".openclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("openclaw.json"),
+            r#"{"gateway":{"port":18789}}"#
+        ).unwrap();
 
-            let entries = vec![
-                PlatformEntry {
-                    platform: Platform::Feishu,
-                    webhook_url: "https://open.feishu.cn/hook/test".into(),
-                },
-            ];
-            write_platform_config("/tmp/install", &entries).unwrap();
+        let entries = vec![
+            PlatformEntry {
+                platform: Platform::Feishu,
+                webhook_url: "https://open.feishu.cn/hook/test".into(),
+            },
+        ];
+        write_platform_config_to(config_dir.clone(), "/tmp/install", &entries).unwrap();
 
-            let data = std::fs::read_to_string(dir.join("openclaw.json")).unwrap();
-            let v: serde_json::Value = serde_json::from_str(&data).unwrap();
-            assert_eq!(v["channels"]["feishu"]["webhookUrl"], "https://open.feishu.cn/hook/test");
-            assert_eq!(v["gateway"]["port"], 18789);
-        });
+        let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(v["channels"]["feishu"]["webhookUrl"], "https://open.feishu.cn/hook/test");
+        assert_eq!(v["gateway"]["port"], 18789);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
     fn test_write_empty_platforms_is_noop() {
-        with_temp_home(|| {
-            let result = write_platform_config("/tmp/install", &[]);
-            assert!(result.is_ok());
-            let cfg = dirs::home_dir().unwrap().join(".openclaw").join("openclaw.json");
-            assert!(!cfg.exists());
-        });
+        let tmp = make_temp_dir();
+        let config_dir = tmp.join(".openclaw");
+        let result = write_platform_config_to(config_dir.clone(), "/tmp/install", &[]);
+        assert!(result.is_ok());
+        assert!(!config_dir.join("openclaw.json").exists());
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
