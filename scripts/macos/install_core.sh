@@ -233,7 +233,7 @@ main() {
 
   # 系统环境检查（bundled 模式下函数已内嵌，跳过 source）
   if ! declare -f check_macos_version > /dev/null 2>&1; then
-    # shellcheck source=detect.sh
+    # shellcheck source=scripts/macos/detect.sh
     source "$(dirname "$0")/detect.sh" || fatal "缺少 detect.sh"
   fi
   run_system_checks || fatal "系统检查失败，无法继续安装"
@@ -243,7 +243,7 @@ main() {
   if [[ "$mode" == "online" ]]; then
     # bundled 模式下函数已内嵌，跳过 source
     if ! declare -f clash_disclaimer > /dev/null 2>&1; then
-      # shellcheck source=clash.sh
+      # shellcheck source=scripts/macos/clash.sh
       source "$(dirname "$0")/clash.sh" || fatal "缺少 clash.sh"
     fi
     if clash_disclaimer; then
@@ -275,7 +275,7 @@ main() {
   if [[ "${INSTALL_SERVICE}" == "yes" ]]; then
     # bundled 模式下函数已内嵌，跳过 source
     if ! declare -f generate_plist > /dev/null 2>&1; then
-      # shellcheck source=service.sh
+      # shellcheck source=scripts/macos/service.sh
       source "$(dirname "$0")/service.sh" || fatal "缺少 service.sh"
     fi
     export NODE_BIN="$INSTALL_PATH/node/node"

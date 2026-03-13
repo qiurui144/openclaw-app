@@ -16,5 +16,5 @@ for lib in detect service clash; do
   fi
 done
 
-# shellcheck source=install_core.sh
+# shellcheck source=scripts/macos/install_core.sh
 source "$SCRIPT_DIR/install_core.sh"
