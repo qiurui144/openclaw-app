@@ -132,8 +132,9 @@ jobs:
           OUT_DIR: dist/macos/x64
 
       - name: 打包 ZIP
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG=${{ github.ref_name }}
           cp scripts/macos/detect.sh scripts/macos/service.sh scripts/macos/clash.sh dist/macos/
           cd dist/macos
           zip -r "../../openclaw-wizard-${TAG}-macos-arm64.zip" install.command detect.sh service.sh clash.sh

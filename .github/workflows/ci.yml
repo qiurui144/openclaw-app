@@ -43,6 +43,11 @@ jobs:
         working-directory: src-tauri
         run: cargo check --no-default-features
 
+      - name: cargo check (bundled feature, Linux only)
+        if: matrix.os == 'ubuntu-20.04'
+        working-directory: src-tauri
+        run: cargo check --features bundled
+
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --no-default-features 2>&1
