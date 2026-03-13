@@ -107,7 +107,15 @@ fn check_disk_space() -> CheckItem {
             }
         }
         #[cfg(windows)]
-        { 0 }
+        {
+            use sysinfo::Disks;
+            let disks = Disks::new_with_refreshed_list();
+            disks.iter()
+                .filter(|d| path.starts_with(d.mount_point()))
+                .max_by_key(|d| d.mount_point().as_os_str().len())
+                .map(|d| d.available_space() / (1024 * 1024))
+                .unwrap_or(0)
+        }
     };
 
     let passed = available_mb >= 512;

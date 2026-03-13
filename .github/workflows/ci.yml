@@ -42,15 +42,21 @@ jobs:
       - name: cargo check
         working-directory: src-tauri
         run: cargo check --no-default-features
+        env:
+          DEP_TAURI_DEV: "true"
 
       - name: cargo check (bundled feature, Linux only)
         if: matrix.os == 'ubuntu-20.04'
         working-directory: src-tauri
         run: cargo check --features bundled
+        env:
+          DEP_TAURI_DEV: "true"
 
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --no-default-features 2>&1
+        env:
+          DEP_TAURI_DEV: "true"
 
   frontend:
     name: Frontend Tests
