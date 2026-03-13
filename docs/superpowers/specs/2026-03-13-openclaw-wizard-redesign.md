@@ -39,7 +39,15 @@
 | QR 码生成 | qrcode.js（前端） | 纯离线生成，无需网络 |
 | 打包工具 | Tauri Bundler（Linux/Win）+ bash 脚本（macOS） | 见下方说明 |
 
-### 2.1 跨平台分发形式
+### 2.1 跨平台兼容性目标
+
+| 平台 | 最低版本 | 说明 |
+|---|---|---|
+| Linux | Ubuntu 20.04 LTS（Focal） | glibc ≥ 2.31；同等版本的其他发行版理论可用 |
+| Windows | Windows 10（1803 及以上） | 需要 WebView2 Runtime；Windows 11 内置 |
+| macOS | macOS 11 Big Sur | arm64（Apple Silicon）+ x86_64（Intel）均需支持 |
+
+### 2.2 跨平台分发形式
 
 | 平台 | Full Bundle（离线） | Lite（在线） | 签名 | 实现方式 |
 |---|---|---|---|---|
@@ -48,6 +56,62 @@
 | macOS | ZIP 含 .command + resources/（~265MB） | ZIP 含 .command（~1MB） | 无需 | 纯 bash 脚本 |
 
 **macOS 技术说明**：macOS 完全不使用 Tauri，使用独立的 bash 脚本方案（`install.command`）。原因：规避 Apple 开发者账号（$99/年）的签名/公证要求，`.command` 文件双击即可在 Terminal 运行，无需任何签名。Tauri Bundler 仅用于 Linux 和 Windows 的 GUI 向导打包。macOS 脚本与 Tauri 应用无任何代码共享，单独维护（见第 7 节）。
+
+### 2.3 Linux 兼容性约束（Ubuntu 20.04+）
+
+Ubuntu 20.04 的关键限制及解决方案：
+
+| 约束项 | Ubuntu 20.04 现状 | 解决方案 |
+|---|---|---|
+| glibc 版本 | 2.31 | **必须在 Ubuntu 20.04 上编译**（CI runner 使用 `ubuntu-20.04`），产物可在 20.04+ 所有版本运行 |
+| WebKitGTK | 仅有 `libwebkit2gtk-4.0`（无 4.1） | Tauri 编译时启用 feature flag `webkit2gtk-4-0`，`Cargo.toml` 中：`tauri = { features = ["webkit2gtk-4-0"] }` |
+| AppImage 运行时依赖 | 需要 `libfuse2`（20.04 默认有，22.04 默认无） | AppImage 打包时嵌入 `fuse2` 运行时，或在 AppImage 内使用 `--appimage-extract-and-run` 回退 |
+| GTK 版本 | GTK 3（非 GTK 4） | Tauri 2.x 在 Linux 默认使用 GTK 3，兼容 |
+
+`Cargo.toml` 关键配置：
+```toml
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri = { version = "2", features = ["webkit2gtk-4-0"] }
+```
+
+SystemCheckPage 增加 Linux 专项检查：
+- 检测 `libwebkit2gtk-4.0.so` 是否存在（向导自身依赖，AppImage 内已打包，理论上不会缺失，作为诊断信息展示）
+
+### 2.4 Windows 兼容性约束（Win10 1803+）
+
+Tauri 在 Windows 依赖 **WebView2 Runtime**（Microsoft Edge 内核）：
+
+| 场景 | 现状 | 处理方式 |
+|---|---|---|
+| Windows 11 | WebView2 内置，无需安装 | 直接可用 |
+| Windows 10 1803–20H2 | 可能未安装 WebView2 | NSIS 安装包内嵌 WebView2 Bootstrapper，安装向导启动前自动检测并安装 |
+| Windows 10 < 1803 | WebView2 不支持 | SystemCheckPage 检测到后显示"不支持的 Windows 版本"并阻止继续 |
+
+**NSIS 安装包 WebView2 处理策略**：
+- 内嵌 WebView2 Bootstrapper（`MicrosoftEdgeWebview2Setup.exe`，~2MB），在主程序启动前静默安装
+- Full Bundle 版本额外内嵌 WebView2 离线安装包（`MicrosoftEdgeWebView2RuntimeInstallerX64.exe`，~160MB 可选；或仅内嵌 Bootstrapper 在线拉取）
+- Tauri 配置：`tauri.conf.json` 中 `bundle.windows.webviewInstallMode = "embedBootstrapper"`
+
+`tauri.conf.json` 关键配置片段：
+```json
+{
+  "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "minimumWebview2Version": "100.0.0.0"
+      }
+    }
+  }
+}
+```
+
+SystemCheckPage 增加 Windows 专项检查：
+- 检测 Windows 版本（`VerifyVersionInfoW` 或注册表读取），< 1803 时显示必需项失败
+- 检测 WebView2 Runtime 是否已安装（读注册表 `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\...`）；未安装时显示警告，告知"安装包会自动安装，请允许弹出的授权窗口"
 
 ---
 
@@ -88,14 +152,15 @@ WelcomePage (0)
 #### SystemCheckPage
 检查项：
 
-| 项目 | 必需 | 标准 |
-|---|---|---|
-| 操作系统版本 | ✓ | Linux kernel ≥ 4.x / Win 10+ / macOS 11+ |
-| 磁盘空间 | ✓ | ≥ 512MB 可用 |
-| 端口 18789 | ✗ | 未被占用（仅警告） |
-| 网络连通性 | ✗ | 仅在线模式检查（仅警告） |
+| 项目 | 必需 | Linux 标准 | Windows 标准 | macOS 标准 |
+|---|---|---|---|---|
+| 操作系统版本 | ✓ | Ubuntu 20.04+ / kernel ≥ 5.4（20.04 默认内核） | Windows 10 build 1803+（通过注册表 `CurrentBuildNumber` 读取） | macOS 11 Big Sur+ |
+| 磁盘空间 | ✓ | ≥ 512MB 可用 | ≥ 512MB 可用 | ≥ 512MB 可用 |
+| WebView2 Runtime | ✓（仅 Windows） | 不适用 | 检测注册表；未安装时显示"将自动安装"警告而非阻止 | 不适用 |
+| 端口 18789 | ✗ | 未被占用（仅警告） | 同左 | 同左 |
+| 网络连通性 | ✗ | 仅在线模式检查（仅警告） | 同左 | 同左 |
 
-所有必需项通过才启用"下一步"。
+所有**必需项**通过才启用"下一步"。Windows 10 build < 1803 时操作系统版本项显示必需失败，阻止安装。
 
 #### SourcePage（新增）
 
@@ -470,11 +535,13 @@ resources/clash/
 
 ### 9.2 CI/CD 矩阵
 
-| 构建目标 | Runner | 产物 |
-|---|---|---|
-| Linux Full/Lite | ubuntu-20.04 | AppImage |
-| Windows Full/Lite | windows-2022 | NSIS EXE |
-| macOS Full/Lite | macos-13 | ZIP + .command |
+| 构建目标 | Runner | 关键配置 | 产物 |
+|---|---|---|---|
+| Linux Full/Lite | **ubuntu-20.04**（必须，锁定 glibc 2.31） | `tauri features = ["webkit2gtk-4-0"]` | AppImage |
+| Windows Full/Lite | windows-2022 | WebView2 Bootstrapper 内嵌；`webviewInstallMode = embedBootstrapper` | NSIS EXE |
+| macOS Full/Lite | macos-13（Intel）+ macos-14（Apple Silicon） | 分别编译 x86_64 / arm64，lipo 合并为 universal binary 或分别发布 | ZIP + .command |
+
+**Linux runner 版本锁定说明**：CI 中必须使用 `ubuntu-20.04` 而非 `ubuntu-latest`（当前为 22.04），否则 glibc 会升至 2.35，产物在 Ubuntu 20.04 上运行时报 `GLIBC_2.33 not found`。GitHub Actions 的 `ubuntu-20.04` runner 将于 2025 年底 EOL，届时需迁移到使用 Docker `ubuntu:20.04` 容器内编译的方案。
 
 ---
 
