@@ -1,7 +1,9 @@
-// Plan B 将实现完整前端
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
+import { createApp } from "vue";
+import { createPinia } from "pinia";
+import App from "./App.vue";
+import { router } from "./router";
 
-const app = createApp({ template: '<div>OpenClaw Wizard - Loading...</div>' })
-app.use(createPinia())
-app.mount('#app')
+const app = createApp(App);
+app.use(createPinia());
+app.use(router);
+app.mount("#app");
