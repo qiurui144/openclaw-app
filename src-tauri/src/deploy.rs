@@ -1,0 +1,538 @@
+use anyhow::Result;
+use secrecy::{ExposeSecret, Secret};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use tauri::{Emitter, Window};
+
+use crate::platform_config::PlatformEntry;
+#[allow(unused_imports)]
+use crate::session_state::{SessionState, DownloadedFile};
+
+// ── IPC DTO：从前端接收，立即转换为内部类型 ──────────────────────
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployConfigDto {
+    pub install_path: String,
+    pub service_port: u16,
+    pub admin_password: String,   // 仅在 IPC boundary 使用
+    pub domain_name: Option<String>,
+    pub install_service: bool,
+    pub start_on_boot: bool,
+    pub source_mode: SourceModeDto,
+    pub platforms: Vec<PlatformEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub enum SourceModeDto {
+    Bundled,
+    Online { proxy_url: Option<String> },
+    LocalZip { path: String },
+}
+
+// ── 内部安全类型：admin_password 使用 Secret<String> ─────────────
+pub struct DeployConfig {
+    pub install_path: String,
+    pub service_port: u16,
+    pub admin_password: Secret<String>,
+    pub domain_name: Option<String>,
+    pub install_service: bool,
+    pub start_on_boot: bool,
+    pub source_mode: SourceMode,
+    pub platforms: Vec<PlatformEntry>,
+}
+
+pub enum SourceMode {
+    Bundled,
+    /// proxy_url = "http://127.0.0.1:{clash_port}"（Clash 启动后填入）
+    Online { proxy_url: Option<String> },
+    LocalZip(PathBuf),
+}
+
+impl From<DeployConfigDto> for DeployConfig {
+    fn from(dto: DeployConfigDto) -> Self {
+        DeployConfig {
+            install_path: dto.install_path,
+            service_port: dto.service_port,
+            admin_password: Secret::new(dto.admin_password),
+            domain_name: dto.domain_name,
+            install_service: dto.install_service,
+            start_on_boot: dto.start_on_boot,
+            source_mode: match dto.source_mode {
+                SourceModeDto::Bundled => SourceMode::Bundled,
+                SourceModeDto::Online { proxy_url } =>
+                    SourceMode::Online { proxy_url },
+                SourceModeDto::LocalZip { path } =>
+                    SourceMode::LocalZip(PathBuf::from(path)),
+            },
+            platforms: dto.platforms,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DeployProgress {
+    pub step: u32,
+    pub total: u32,
+    pub percent: u32,
+    pub message: String,
+}
+
+/// 向前端发送进度事件
+fn emit_progress(window: &Window, step: u32, total: u32, msg: &str) {
+    let _ = window.emit("deploy:progress", DeployProgress {
+        step,
+        total,
+        percent: (step * 100) / total,
+        message: msg.to_string(),
+    });
+}
+
+pub async fn start_deploy(config: DeployConfig, window: Window) -> Result<()> {
+    const TOTAL: u32 = 11;
+
+    // Step 1: 创建安装目录
+    emit_progress(&window, 1, TOTAL, "创建安装目录…");
+    std::fs::create_dir_all(&config.install_path)?;
+
+    // Step 2-4: 获取并解包资源（因 SourceMode 不同行为差异）
+    emit_progress(&window, 2, TOTAL, "获取 Node.js 运行时…");
+    acquire_node(&config).await?;
+
+    emit_progress(&window, 3, TOTAL, "获取 OpenClaw 安装包…");
+    acquire_openclaw_package(&config).await?;
+
+    emit_progress(&window, 4, TOTAL, "解包 OpenClaw（含所有依赖，请稍候）…");
+    extract_openclaw(&config)?;
+
+    // Step 5: 写入主配置
+    emit_progress(&window, 5, TOTAL, "写入配置文件…");
+    write_main_config(&config)?;
+
+    // Step 6: 写入平台集成配置
+    emit_progress(&window, 6, TOTAL, "写入平台集成配置…");
+    crate::platform_config::write_platform_config(
+        &config.install_path, &config.platforms)?;
+
+    // Step 7: 注册系统服务
+    if config.install_service {
+        emit_progress(&window, 7, TOTAL, "注册系统服务…");
+        install_service(&config)?;
+    }
+
+    // Step 8: 启动服务
+    emit_progress(&window, 8, TOTAL, "启动 OpenClaw 服务…");
+    start_service(&config)?;
+
+    // Step 9: 健康检查
+    emit_progress(&window, 9, TOTAL, "等待服务就绪…");
+    health_check(config.service_port).await?;
+
+    // Step 10: 生成卸载脚本
+    emit_progress(&window, 10, TOTAL, "生成卸载脚本…");
+    write_uninstall_script(&config)?;
+
+    // Step 11: 写入安装记录
+    emit_progress(&window, 11, TOTAL, "完成！");
+    write_deploy_meta(&config)?;
+    crate::session_state::clear(Some(&config.install_path))?;
+
+    let _ = window.emit("deploy:done", ());
+    Ok(())
+}
+
+// ── 各步骤实现 ────────────────────────────────────────────────────
+
+async fn acquire_node(config: &DeployConfig) -> Result<()> {
+    let node_dir = PathBuf::from(&config.install_path).join("node");
+    std::fs::create_dir_all(&node_dir)?;
+    let dest = node_dir.join(if cfg!(windows) { "node.exe" } else { "node" });
+
+    match &config.source_mode {
+        SourceMode::Bundled => {
+            #[cfg(feature = "bundled")]
+            {
+                #[cfg(target_os = "linux")]
+                let data = include_bytes!("../../resources/binaries/linux/node");
+                #[cfg(target_os = "windows")]
+                let data = include_bytes!("..\\..\\resources\\binaries\\windows\\node.exe");
+                std::fs::write(&dest, &data[..])?;
+            }
+            #[cfg(not(feature = "bundled"))]
+            anyhow::bail!("Bundled 模式需要使用 --features bundled 编译（资源文件未内嵌）");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&dest,
+                    std::fs::Permissions::from_mode(0o755))?;
+            }
+        }
+        SourceMode::Online { proxy_url } => {
+            download_node_binary(&dest, proxy_url.as_deref()).await?;
+        }
+        SourceMode::LocalZip(zip_path) => {
+            extract_from_zip(zip_path, "node", &dest)?;
+        }
+    }
+    Ok(())
+}
+
+async fn acquire_openclaw_package(config: &DeployConfig) -> Result<()> {
+    let dest = PathBuf::from(&config.install_path).join("openclaw.tgz");
+    match &config.source_mode {
+        SourceMode::Bundled => {
+            #[cfg(feature = "bundled")]
+            {
+                #[cfg(target_os = "linux")]
+                let data = include_bytes!("../../resources/binaries/linux/openclaw.tgz");
+                #[cfg(target_os = "windows")]
+                let data = include_bytes!("..\\..\\resources\\binaries\\windows\\openclaw.tgz");
+                std::fs::write(&dest, &data[..])?;
+            }
+            #[cfg(not(feature = "bundled"))]
+            anyhow::bail!("Bundled 模式需要使用 --features bundled 编译");
+        }
+        SourceMode::Online { proxy_url } => {
+            download_openclaw_package(&dest, proxy_url.as_deref()).await?;
+        }
+        SourceMode::LocalZip(zip_path) => {
+            extract_from_zip(zip_path, "openclaw.tgz", &dest)?;
+        }
+    }
+    Ok(())
+}
+
+fn extract_openclaw(config: &DeployConfig) -> Result<()> {
+    let tgz = PathBuf::from(&config.install_path).join("openclaw.tgz");
+    let dest = PathBuf::from(&config.install_path).join("openclaw_pkg");
+    std::fs::create_dir_all(&dest)?;
+
+    let file = std::fs::File::open(&tgz)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(gz);
+    archive.unpack(&dest)?;
+    std::fs::remove_file(&tgz)?;
+    Ok(())
+}
+
+fn write_main_config(config: &DeployConfig) -> Result<()> {
+    use secrecy::ExposeSecret;
+    let config_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".openclaw");
+    std::fs::create_dir_all(&config_dir)?;
+
+    let password_hash = bcrypt::hash(
+        config.admin_password.expose_secret(), bcrypt::DEFAULT_COST)?;
+
+    let mut gateway = serde_json::json!({
+        "port": config.service_port,
+        "auth": {
+            "mode": "password",
+            "passwordHash": password_hash
+        }
+    });
+    if let Some(domain) = &config.domain_name {
+        gateway["publicUrl"] = serde_json::json!(format!("https://{}", domain));
+    }
+
+    let cfg = serde_json::json!({ "gateway": gateway });
+    std::fs::write(
+        config_dir.join("openclaw.json"),
+        serde_json::to_string_pretty(&cfg)?
+    )?;
+    Ok(())
+}
+
+fn install_service(config: &DeployConfig) -> Result<()> {
+    let node_bin = PathBuf::from(&config.install_path)
+        .join("node")
+        .join(if cfg!(windows) { "node.exe" } else { "node" });
+    let script = PathBuf::from(&config.install_path)
+        .join("openclaw_pkg")
+        .join("node_modules")
+        .join("openclaw")
+        .join("openclaw.mjs");
+    let port = config.service_port;
+
+    #[cfg(target_os = "linux")]
+    {
+        let unit_dir = dirs::home_dir().unwrap().join(".config/systemd/user");
+        std::fs::create_dir_all(&unit_dir)?;
+        let unit = format!(
+            "[Unit]\nDescription=OpenClaw Gateway\nAfter=network.target\n\n\
+             [Service]\nType=simple\n\
+             ExecStart={} {} gateway --port {}\n\
+             Restart=on-failure\nRestartSec=10\n\
+             Environment=NODE_ENV=production\n\
+             StandardOutput=journal\nStandardError=journal\n\n\
+             [Install]\nWantedBy=default.target\n",
+            node_bin.display(), script.display(), port
+        );
+        std::fs::write(unit_dir.join("openclaw.service"), unit)?;
+        std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .status()?;
+        if config.start_on_boot {
+            std::process::Command::new("systemctl")
+                .args(["--user", "enable", "openclaw.service"])
+                .status()?;
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let cmd = format!("\"{}\" \"{}\" gateway --port {}",
+            node_bin.display(), script.display(), port);
+        std::process::Command::new("schtasks")
+            .args(["/Create", "/F",
+                "/SC", "ONLOGON",
+                "/TN", "OpenClaw Gateway",
+                "/TR", &cmd])
+            .status()?;
+    }
+    Ok(())
+}
+
+fn start_service(config: &DeployConfig) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("systemctl")
+        .args(["--user", "start", "openclaw.service"])
+        .status()?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("schtasks")
+        .args(["/Run", "/TN", "OpenClaw Gateway"])
+        .status()?;
+    let _ = config;
+    Ok(())
+}
+
+pub async fn health_check(port: u16) -> Result<()> {
+    use std::net::TcpStream;
+    let url = format!("http://127.0.0.1:{}/health", port);
+    for i in 0..15 {
+        let has_listener = TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok();
+        if has_listener {
+            if reqwest::get(&url).await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+        }
+        if i < 14 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+    let has_listener = TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok();
+    if has_listener {
+        use sysinfo::System;
+        let mut sys = System::new();
+        sys.refresh_all();
+        let occupant = sys.processes().values()
+            .find(|p| p.name().to_string().contains("openclaw"))
+            .map(|p| format!("PID {}", p.pid()))
+            .unwrap_or_else(|| "其他进程".into());
+        anyhow::bail!(
+            "端口 {} 被 {} 占用但未响应健康检查，请检查端口冲突", port, occupant
+        )
+    }
+    anyhow::bail!("服务在 30 秒内未能正常启动，请查看日志")
+}
+
+fn write_uninstall_script(config: &DeployConfig) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let script = format!(
+            "#!/bin/bash\nset -e\n\
+             systemctl --user stop openclaw.service 2>/dev/null || true\n\
+             systemctl --user disable openclaw.service 2>/dev/null || true\n\
+             rm -f ~/.config/systemd/user/openclaw.service\n\
+             systemctl --user daemon-reload\n\
+             rm -rf {}\n\
+             rm -rf ~/.openclaw\n\
+             echo '✓ OpenClaw 已卸载'\n",
+            config.install_path
+        );
+        let path = PathBuf::from(&config.install_path).join("uninstall.sh");
+        std::fs::write(&path, script)?;
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    }
+    #[cfg(windows)]
+    {
+        let script = format!(
+            "@echo off\r\n\
+             schtasks /End /TN \"OpenClaw Gateway\" 2>nul\r\n\
+             schtasks /Delete /TN \"OpenClaw Gateway\" /F 2>nul\r\n\
+             rmdir /S /Q \"{}\"\r\n\
+             rmdir /S /Q \"%USERPROFILE%\\.openclaw\"\r\n\
+             echo OpenClaw 已卸载\r\n",
+            config.install_path
+        );
+        std::fs::write(
+            PathBuf::from(&config.install_path).join("uninstall.bat"),
+            script
+        )?;
+    }
+    Ok(())
+}
+
+fn write_deploy_meta(config: &DeployConfig) -> Result<()> {
+    let meta_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".openclaw");
+    let meta = serde_json::json!({
+        "install_path": config.install_path,
+        "version": env!("CARGO_PKG_VERSION"),
+        "deployed_at": chrono::Utc::now().to_rfc3339(),
+        "service_port": config.service_port,
+    });
+    std::fs::write(
+        meta_dir.join("deploy_meta.json"),
+        serde_json::to_string_pretty(&meta)?
+    )?;
+    Ok(())
+}
+
+// ── 网络下载辅助（Online 模式）────────────────────────────────────
+
+async fn download_node_binary(dest: &PathBuf, proxy: Option<&str>) -> Result<()> {
+    let version = "22.17.0";
+    #[cfg(target_os = "linux")]
+    let url = format!(
+        "https://nodejs.org/dist/v{}/node-v{}-linux-x64.tar.xz", version, version);
+    #[cfg(target_os = "windows")]
+    let url = format!(
+        "https://nodejs.org/dist/v{}/node-v{}-win-x64.zip", version, version);
+
+    let client = build_client(proxy)?;
+    let bytes = client.get(&url).send().await?.bytes().await?;
+    let archive_tmp = dest.with_file_name("node_archive.tmp");
+    std::fs::write(&archive_tmp, &bytes)?;
+    extract_node_from_archive(&archive_tmp, dest)?;
+    std::fs::remove_file(&archive_tmp).ok();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let data = std::fs::read(archive)?;
+        let xz = xz2::read::XzDecoder::new(std::io::Cursor::new(data));
+        let mut tar = tar::Archive::new(xz);
+        for entry in tar.entries()? {
+            let mut e = entry?;
+            let path = e.path()?.into_owned();
+            if path.ends_with("bin/node") {
+                e.unpack(dest)?;
+                return Ok(());
+            }
+        }
+        anyhow::bail!("Node.js 压缩包中未找到 bin/node");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let data = std::fs::read(archive)?;
+        let cursor = std::io::Cursor::new(data);
+        let mut zip = zip::ZipArchive::new(cursor)?;
+        for i in 0..zip.len() {
+            let mut file = zip.by_index(i)?;
+            if file.name().ends_with("node.exe") {
+                let mut out = std::fs::File::create(dest)?;
+                std::io::copy(&mut file, &mut out)?;
+                return Ok(());
+            }
+        }
+        anyhow::bail!("Node.js 压缩包中未找到 node.exe");
+    }
+}
+
+async fn download_openclaw_package(dest: &PathBuf, proxy: Option<&str>) -> Result<()> {
+    let url = "https://github.com/openclaw/openclaw/releases/latest/download/openclaw.tgz";
+    let client = build_client(proxy)?;
+    let bytes = client.get(url).send().await?.bytes().await?;
+    std::fs::write(dest, &bytes)?;
+    Ok(())
+}
+
+fn build_client(proxy: Option<&str>) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300));
+    if let Some(proxy_url) = proxy {
+        builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+    }
+    Ok(builder.build()?)
+}
+
+fn extract_from_zip(zip_path: &PathBuf, entry_name: &str, dest: &PathBuf) -> Result<()> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        if entry.name().ends_with(entry_name) {
+            let mut data = Vec::new();
+            std::io::copy(&mut entry, &mut data)?;
+            std::fs::write(dest, data)?;
+            return Ok(());
+        }
+    }
+    anyhow::bail!("ZIP 中未找到 {}", entry_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dto_to_config_conversion() {
+        let dto = DeployConfigDto {
+            install_path: "/opt/openclaw".into(),
+            service_port: 18789,
+            admin_password: "Secret123".into(),
+            domain_name: None,
+            install_service: true,
+            start_on_boot: true,
+            source_mode: SourceModeDto::Bundled,
+            platforms: vec![],
+        };
+        let config = DeployConfig::from(dto);
+        // 密码已包装为 Secret，不可直接读取（需 expose_secret()）
+        assert_eq!(config.admin_password.expose_secret(), "Secret123");
+        assert_eq!(config.service_port, 18789);
+    }
+
+    #[test]
+    fn test_deploy_progress_serializable() {
+        let p = DeployProgress {
+            step: 1,
+            total: 11,
+            percent: 9,
+            message: "创建安装目录".into(),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("创建安装目录"));
+        assert!(json.contains("\"percent\":9"));
+    }
+
+    #[test]
+    fn test_source_mode_local_zip_path() {
+        let dto = DeployConfigDto {
+            install_path: "/opt/openclaw".into(),
+            service_port: 18789,
+            admin_password: "Secret123".into(),
+            domain_name: None,
+            install_service: false,
+            start_on_boot: false,
+            source_mode: SourceModeDto::LocalZip {
+                path: "/tmp/openclaw.zip".into()
+            },
+            platforms: vec![],
+        };
+        let config = DeployConfig::from(dto);
+        assert!(matches!(config.source_mode, SourceMode::LocalZip(_)));
+    }
+}
