@@ -22,10 +22,14 @@ Makefile
 *.debug
 
 # ── Binary embeds (to avoid committing large blobs) ──────────
-resources/binaries/linux/openclaw-server
-resources/binaries/linux/openclaw-config
-resources/binaries/windows/openclaw-server.exe
-resources/binaries/windows/openclaw-config.exe
+resources/binaries/linux/node
+resources/binaries/linux/openclaw.tgz
+resources/binaries/windows/node.exe
+resources/binaries/windows/openclaw.tgz
+# 保留占位说明文件
+!resources/binaries/README.md
+!resources/binaries/linux/.gitkeep
+!resources/binaries/windows/.gitkeep
 
 # ── IDE ───────────────────────────────────────────────────────
 .idea/
@@ -38,3 +42,4 @@ resources/binaries/windows/openclaw-config.exe
 scripts/toolchain-mingw64.cmake
 scripts/openclaw.nsi
 *.AppImage
+.worktrees/
