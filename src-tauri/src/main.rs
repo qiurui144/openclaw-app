@@ -98,6 +98,32 @@ async fn apply_openclaw_update(
     ).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    open::that(&url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_deploy_meta() -> Option<serde_json::Value> {
+    let path = dirs::home_dir()?.join(".openclaw/deploy_meta.json");
+    let data = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+#[tauri::command]
+fn get_default_install_path() -> String {
+    #[cfg(target_os = "linux")]
+    return "/opt/openclaw".to_string();
+    #[cfg(target_os = "windows")]
+    return format!("{}\\openclaw",
+        std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\Users\\Public".to_string()));
+    #[cfg(target_os = "macos")]
+    return format!("{}/openclaw",
+        dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "~".to_string()));
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    return "/opt/openclaw".to_string();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 fn main() {
     tauri::Builder::default()
@@ -111,7 +137,10 @@ fn main() {
             list_skills,
             update_skills,
             check_openclaw_update,
-            apply_openclaw_update
+            apply_openclaw_update,
+            open_url,
+            read_deploy_meta,
+            get_default_install_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

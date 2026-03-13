@@ -2443,6 +2443,7 @@ dependencies = [
  "flate2",
  "hex",
  "libc",
+ "open",
  "reqwest 0.12.28",
  "secrecy",
  "semver",
