@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import WizardLayout from "@/components/WizardLayout.vue";
 import CheckItemComponent from "@/components/CheckItem.vue";
 import { useWizardStore } from "@/stores/wizard";

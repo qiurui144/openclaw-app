@@ -50,7 +50,7 @@ defineEmits<{ next: [] }>();
 
 const wizard = useWizardStore();
 const router = useRouter();
-const { back, currentIndex, routeOrder } = useWizardNav();
+const { back, currentIndex } = useWizardNav();
 
 const canGoBack = computed(() => {
   const idx = currentIndex();
