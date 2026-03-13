@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Linux 系统依赖
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.0-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            squashfs-tools fuse libfuse2
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: 构建 Lite AppImage
+        run: npm run tauri build -- --target x86_64-unknown-linux-gnu
+        env:
+          OC_BUILD_BUNDLED: "0"
+          OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
+
+      - name: 获取内嵌资源
+        run: |
+          chmod +x scripts/fetch_resources.sh
+          bash scripts/fetch_resources.sh
+        env:
+          NODE_VERSION: "22.17.0"
+          RESOURCES_DIR: resources/binaries
+
+      - name: 构建 Full Bundle AppImage
+        run: npm run tauri build -- --features bundled
+        env:
+          OC_BUILD_BUNDLED: "1"
+          OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
+
+      - name: 重命名产物
+        run: |
+          cd src-tauri/target/release/bundle/appimage/
+          ls -lh *.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+
+  build-windows:
+    name: Build Windows NSIS
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: 构建 Lite NSIS
+        run: npm run tauri build
+        env:
+          OC_BUILD_BUNDLED: "0"
+
+      - name: 获取 Windows Node.js
+        shell: bash
+        run: |
+          mkdir -p resources/binaries/windows
+          curl -fsSL "https://nodejs.org/dist/v22.17.0/node-v22.17.0-win-x64.zip" -o node_win.zip
+          unzip -p node_win.zip "node-v22.17.0-win-x64/node.exe" > resources/binaries/windows/node.exe
+          rm node_win.zip
+
+      - name: 构建 Full Bundle NSIS
+        run: npm run tauri build -- --features bundled
+        env:
+          OC_BUILD_BUNDLED: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+
+  build-macos:
+    name: Build macOS Bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装打包依赖
+        run: brew install coreutils
+
+      - name: 下载 openclaw.tgz
+        run: |
+          curl -fsSL \
+            "https://github.com/openclaw/openclaw/releases/latest/download/openclaw.tgz" \
+            -o resources/openclaw.tgz
+
+      - name: 打包 macOS Full Bundle (arm64)
+        run: bash scripts/macos/build_bundle.sh
+        env:
+          NODE_ARCH: arm64
+          OUT_DIR: dist/macos
+
+      - name: 打包 macOS Full Bundle (x86_64)
+        run: bash scripts/macos/build_bundle.sh
+        env:
+          NODE_ARCH: x86_64
+          OUT_DIR: dist/macos/x64
+
+      - name: 打包 ZIP
+        run: |
+          TAG=${{ github.ref_name }}
+          cp scripts/macos/detect.sh scripts/macos/service.sh scripts/macos/clash.sh dist/macos/
+          cd dist/macos
+          zip -r "../../openclaw-wizard-${TAG}-macos-arm64.zip" install.command detect.sh service.sh clash.sh
+          cd x64
+          zip -r "../../../openclaw-wizard-${TAG}-macos-x64.zip" install.command detect.sh service.sh clash.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundle
+          path: "*.zip"
+
+  publish:
+    name: Publish Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts/
+
+      - name: 列出产物
+        run: ls -lh artifacts/
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**
+          body: |
+            ## OpenClaw 部署向导 ${{ github.ref_name }}
+
+            ### 下载
+
+            | 平台 | 类型 | 下载 |
+            |---|---|---|
+            | Linux (x64) | Lite（在线） | `*-linux-x64-lite.AppImage` |
+            | Linux (x64) | Full Bundle（离线） | `*-linux-x64-full.AppImage` |
+            | Windows 10/11 | Lite（在线） | `*-windows-lite.exe` |
+            | Windows 10/11 | Full Bundle（离线） | `*-windows-full.exe` |
+            | macOS (Apple Silicon) | 一键脚本 | `*-macos-arm64.zip` |
+            | macOS (Intel) | 一键脚本 | `*-macos-x64.zip` |
+
+            ### 最低系统要求
+            - Linux: Ubuntu 20.04+（glibc >= 2.31）
+            - Windows: Windows 10 1803+（WebView2 自动安装）
+            - macOS: macOS 11 Big Sur+
