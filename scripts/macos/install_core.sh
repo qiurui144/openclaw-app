@@ -106,7 +106,7 @@ acquire_openclaw() {
   info "解包 openclaw…"
   local pkg_dir="$INSTALL_PATH/openclaw_pkg"
   mkdir -p "$pkg_dir"
-  tar -xzf "$pkg_tgz" -C "$pkg_dir" --strip-components=1
+  tar -xzf "$pkg_tgz" -C "$pkg_dir" --strip-components=1 || fatal "openclaw 包解压失败"
   rm -f "$pkg_tgz"
   ok "openclaw 包就绪"
 }
@@ -140,11 +140,14 @@ write_config() {
   # bcrypt 哈希由 node 脚本生成（避免 bash 依赖 bcrypt）
   local node_bin="$INSTALL_PATH/node/node"
   local hashed_pwd
-  hashed_pwd=$("$node_bin" -e "
+  hashed_pwd=$(printf '%s' "$ADMIN_PASSWORD" | "$node_bin" -e "
     const crypto = require('crypto');
-    const h = crypto.createHash('sha256').update(process.argv[1]).digest('hex');
-    console.log(h);
-  " "$ADMIN_PASSWORD") || fatal "密码哈希生成失败"
+    let pwd = '';
+    process.stdin.on('data', d => { pwd += d; });
+    process.stdin.on('end', () => {
+      console.log(crypto.createHash('sha256').update(pwd).digest('hex'));
+    });
+  ") || fatal "密码哈希生成失败"
 
   python3 -c "
 import json, sys
@@ -228,14 +231,19 @@ main() {
   local mode; mode=$(detect_install_mode)
   info "安装模式：$mode"
 
-  # 系统环境检查
-  source "$(dirname "$0")/detect.sh"
+  # 系统环境检查（bundled 模式下函数已内嵌，跳过 source）
+  if ! declare -f check_macos_version > /dev/null 2>&1; then
+    source "$(dirname "$0")/detect.sh" || fatal "缺少 detect.sh"
+  fi
   run_system_checks || fatal "系统检查失败，无法继续安装"
 
   # 代理配置（仅 online 模式）
   local use_clash=no
   if [[ "$mode" == "online" ]]; then
-    source "$(dirname "$0")/clash.sh"
+    # bundled 模式下函数已内嵌，跳过 source
+    if ! declare -f clash_disclaimer > /dev/null 2>&1; then
+      source "$(dirname "$0")/clash.sh" || fatal "缺少 clash.sh"
+    fi
     if clash_disclaimer; then
       read -rp "请输入订阅链接: " sub_url
       clash_start "$sub_url" || { warn "代理启动失败，将直连下载"; use_clash=no; }
@@ -248,6 +256,7 @@ main() {
 
   # 创建安装目录
   mkdir -p "$INSTALL_PATH/.tmp"
+  trap 'rm -rf "${INSTALL_PATH:?}/.tmp"' EXIT
 
   # 获取资源
   acquire_node "$mode"
@@ -258,7 +267,10 @@ main() {
 
   # 注册系统服务
   if [[ "${INSTALL_SERVICE}" == "yes" ]]; then
-    source "$(dirname "$0")/service.sh"
+    # bundled 模式下函数已内嵌，跳过 source
+    if ! declare -f generate_plist > /dev/null 2>&1; then
+      source "$(dirname "$0")/service.sh" || fatal "缺少 service.sh"
+    fi
     NODE_BIN="$INSTALL_PATH/node/node"
     OPENCLAW_SCRIPT="$INSTALL_PATH/openclaw_pkg/index.js"
     install_service

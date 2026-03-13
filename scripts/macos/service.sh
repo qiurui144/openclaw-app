@@ -49,7 +49,9 @@ PLIST
 # 注册并启动服务
 install_service() {
   generate_plist "$PLIST_PATH"
-  launchctl load -w "$PLIST_PATH" 2>/dev/null || true
+  if ! launchctl load -w "$PLIST_PATH" 2>/dev/null; then
+    echo "警告：launchctl load 失败，请检查 $PLIST_PATH 或权限" >&2
+  fi
   echo "服务已注册：$OPENCLAW_LABEL"
 }
 

@@ -61,7 +61,7 @@ run_system_checks() {
   echo "═══ 系统环境检查 ═══"
   check_macos_version    || { [[ $? -eq 1 ]] && fatal=1; }
   check_disk_space "${INSTALL_PATH:-$HOME/openclaw}" 512 || { [[ $? -eq 1 ]] && fatal=1; }
-  check_port_free "${SERVICE_PORT:-18789}"
+  check_port_free "${SERVICE_PORT:-18789}" || true
   check_curl             || fatal=1
   echo "════════════════════"
   return $fatal
