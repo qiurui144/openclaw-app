@@ -13,24 +13,24 @@ teardown() {
   rm -rf "$TMPDIR_TEST"
 }
 
-@test "clash_save_sub: 保存订阅 URL" {
+@test "clash_save_sub: saves subscription URL" {
   clash_save_sub "https://example.com/sub"
   local saved
   saved=$(clash_load_sub)
   [ "$saved" = "https://example.com/sub" ]
 }
 
-@test "clash_mihomo_url: arm64 返回正确 URL" {
+@test "clash_mihomo_url: arm64 returns correct URL" {
   run clash_mihomo_url "arm64"
   [[ "$output" == *"darwin-arm64"* ]]
 }
 
-@test "clash_mihomo_url: x86_64 返回正确 URL" {
+@test "clash_mihomo_url: x86_64 returns correct URL" {
   run clash_mihomo_url "x86_64"
   [[ "$output" == *"darwin-amd64"* ]]
 }
 
-@test "clash_stop: 无进程时不报错" {
+@test "clash_stop: no error when no process running" {
   run clash_stop
   [ "$status" -eq 0 ]
 }

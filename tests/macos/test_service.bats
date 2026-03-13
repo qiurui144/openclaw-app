@@ -8,7 +8,6 @@ setup() {
   export INSTALL_PATH="$TMPDIR_TEST/openclaw"
   export SERVICE_PORT=18789
   export OPENCLAW_LABEL="com.openclaw.gateway.test"
-  # 创建假文件
   mkdir -p "$LAUNCHD_DIR" "$INSTALL_PATH"
   touch "$NODE_BIN" "$OPENCLAW_SCRIPT"
   chmod +x "$NODE_BIN"
@@ -19,17 +18,17 @@ teardown() {
   rm -rf "$TMPDIR_TEST"
 }
 
-@test "generate_plist: 生成 plist 文件" {
+@test "generate_plist: creates plist file" {
   generate_plist "$LAUNCHD_DIR/$OPENCLAW_LABEL.plist"
   [ -f "$LAUNCHD_DIR/$OPENCLAW_LABEL.plist" ]
 }
 
-@test "generate_plist: plist 包含正确 Label" {
+@test "generate_plist: plist contains correct Label" {
   generate_plist "$LAUNCHD_DIR/$OPENCLAW_LABEL.plist"
   grep -q "$OPENCLAW_LABEL" "$LAUNCHD_DIR/$OPENCLAW_LABEL.plist"
 }
 
-@test "generate_plist: plist 包含 RunAtLoad" {
+@test "generate_plist: plist contains RunAtLoad" {
   generate_plist "$LAUNCHD_DIR/$OPENCLAW_LABEL.plist"
   grep -q "RunAtLoad" "$LAUNCHD_DIR/$OPENCLAW_LABEL.plist"
 }
