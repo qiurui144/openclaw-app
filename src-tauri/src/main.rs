@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod system_check;
+mod session_state;
+mod platform_config;
 
 #[tauri::command]
 async fn run_system_check() -> Vec<system_check::CheckItem> {
