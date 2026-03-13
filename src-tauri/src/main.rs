@@ -6,6 +6,7 @@ mod platform_config;
 mod deploy;
 mod clash_proxy;
 mod skills_manager;
+mod updater;
 
 #[tauri::command]
 async fn run_system_check() -> Vec<system_check::CheckItem> {
@@ -75,6 +76,28 @@ async fn update_skills(
     Ok(())
 }
 
+#[tauri::command]
+async fn check_openclaw_update(proxy_url: Option<String>)
+    -> Result<Option<updater::UpdateInfo>, String>
+{
+    updater::check_update(proxy_url.as_deref()).await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn apply_openclaw_update(
+    install_path: String,
+    download_url: String,
+    sha256: Option<String>,
+    proxy_url: Option<String>,
+    window: tauri::Window,
+) -> Result<(), String> {
+    updater::apply_update(
+        &install_path, &download_url,
+        sha256.as_deref(), proxy_url.as_deref(), &window
+    ).await.map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 fn main() {
     tauri::Builder::default()
@@ -86,7 +109,9 @@ fn main() {
             clash_start,
             clash_stop,
             list_skills,
-            update_skills
+            update_skills,
+            check_openclaw_update,
+            apply_openclaw_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
