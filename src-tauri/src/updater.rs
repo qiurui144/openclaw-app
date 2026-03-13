@@ -135,6 +135,15 @@ pub async fn apply_update(
             };
             if crate::deploy::health_check(port).await.is_ok() {
                 std::fs::remove_dir_all(&backup_dir).ok();
+            } else {
+                // 健康检查失败，回滚到旧版本
+                let _ = window.emit("update:progress", "健康检查失败，正在回滚…");
+                std::fs::remove_dir_all(&pkg_dir).ok();
+                if backup_dir.exists() {
+                    std::fs::rename(&backup_dir, &pkg_dir)?;
+                }
+                let _ = start_service();
+                anyhow::bail!("更新后健康检查失败，已回滚到旧版本");
             }
         }
         Err(e) => {
