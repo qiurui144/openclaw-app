@@ -9,7 +9,7 @@ use crate::platform_config::PlatformEntry;
 use crate::session_state::{SessionState, DownloadedFile};
 
 // ── IPC DTO：从前端接收，立即转换为内部类型 ──────────────────────
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct DeployConfigDto {
     pub install_path: String,
     pub service_port: u16,
@@ -156,15 +156,15 @@ async fn acquire_node(config: &DeployConfig) -> Result<()> {
                 #[cfg(target_os = "windows")]
                 let data = include_bytes!("..\\..\\resources\\binaries\\windows\\node.exe");
                 std::fs::write(&dest, &data[..])?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&dest,
+                        std::fs::Permissions::from_mode(0o755))?;
+                }
             }
             #[cfg(not(feature = "bundled"))]
             anyhow::bail!("Bundled 模式需要使用 --features bundled 编译（资源文件未内嵌）");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&dest,
-                    std::fs::Permissions::from_mode(0o755))?;
-            }
         }
         SourceMode::Online { proxy_url } => {
             download_node_binary(&dest, proxy_url.as_deref()).await?;
@@ -256,7 +256,9 @@ fn install_service(config: &DeployConfig) -> Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        let unit_dir = dirs::home_dir().unwrap().join(".config/systemd/user");
+        let unit_dir = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".config/systemd/user");
         std::fs::create_dir_all(&unit_dir)?;
         let unit = format!(
             "[Unit]\nDescription=OpenClaw Gateway\nAfter=network.target\n\n\
@@ -306,10 +308,13 @@ fn start_service(config: &DeployConfig) -> Result<()> {
 }
 
 pub async fn health_check(port: u16) -> Result<()> {
-    use std::net::TcpStream;
     let url = format!("http://127.0.0.1:{}/health", port);
     for i in 0..15 {
-        let has_listener = TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok();
+        let has_listener = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+        ).await.map(|r| r.is_ok()).unwrap_or(false);
+
         if has_listener {
             if reqwest::get(&url).await
                 .map(|r| r.status().is_success())
@@ -322,13 +327,17 @@ pub async fn health_check(port: u16) -> Result<()> {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }
-    let has_listener = TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok();
+    let has_listener = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+    ).await.map(|r| r.is_ok()).unwrap_or(false);
+
     if has_listener {
         use sysinfo::System;
         let mut sys = System::new();
-        sys.refresh_all();
+        sys.refresh_processes();
         let occupant = sys.processes().values()
-            .find(|p| p.name().to_string().contains("openclaw"))
+            .find(|p| p.name().contains("openclaw"))
             .map(|p| format!("PID {}", p.pid()))
             .unwrap_or_else(|| "其他进程".into());
         anyhow::bail!(
@@ -347,7 +356,7 @@ fn write_uninstall_script(config: &DeployConfig) -> Result<()> {
              systemctl --user disable openclaw.service 2>/dev/null || true\n\
              rm -f ~/.config/systemd/user/openclaw.service\n\
              systemctl --user daemon-reload\n\
-             rm -rf {}\n\
+             rm -rf \"{}\"\n\
              rm -rf ~/.openclaw\n\
              echo '✓ OpenClaw 已卸载'\n",
             config.install_path
@@ -396,26 +405,32 @@ fn write_deploy_meta(config: &DeployConfig) -> Result<()> {
 // ── 网络下载辅助（Online 模式）────────────────────────────────────
 
 async fn download_node_binary(dest: &PathBuf, proxy: Option<&str>) -> Result<()> {
-    let version = "22.17.0";
-    #[cfg(target_os = "linux")]
-    let url = format!(
-        "https://nodejs.org/dist/v{}/node-v{}-linux-x64.tar.xz", version, version);
-    #[cfg(target_os = "windows")]
-    let url = format!(
-        "https://nodejs.org/dist/v{}/node-v{}-win-x64.zip", version, version);
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    { let _ = (dest, proxy); anyhow::bail!("当前平台不支持在线下载 Node.js"); }
 
-    let client = build_client(proxy)?;
-    let bytes = client.get(&url).send().await?.bytes().await?;
-    let archive_tmp = dest.with_file_name("node_archive.tmp");
-    std::fs::write(&archive_tmp, &bytes)?;
-    extract_node_from_archive(&archive_tmp, dest)?;
-    std::fs::remove_file(&archive_tmp).ok();
-    #[cfg(unix)]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
+        let version = "22.17.0";
+        #[cfg(target_os = "linux")]
+        let url = format!(
+            "https://nodejs.org/dist/v{}/node-v{}-linux-x64.tar.xz", version, version);
+        #[cfg(target_os = "windows")]
+        let url = format!(
+            "https://nodejs.org/dist/v{}/node-v{}-win-x64.zip", version, version);
+
+        let client = build_client(proxy)?;
+        let bytes = client.get(&url).send().await?.bytes().await?;
+        let archive_tmp = dest.with_file_name("node_archive.tmp");
+        std::fs::write(&archive_tmp, &bytes)?;
+        extract_node_from_archive(&archive_tmp, dest)?;
+        std::fs::remove_file(&archive_tmp).ok();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
@@ -449,6 +464,8 @@ fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
         }
         anyhow::bail!("Node.js 压缩包中未找到 node.exe");
     }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    anyhow::bail!("当前平台不支持自动提取 Node.js 二进制");
 }
 
 async fn download_openclaw_package(dest: &PathBuf, proxy: Option<&str>) -> Result<()> {
