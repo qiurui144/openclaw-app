@@ -5,6 +5,7 @@ mod session_state;
 mod platform_config;
 mod deploy;
 mod clash_proxy;
+mod skills_manager;
 
 #[tauri::command]
 async fn run_system_check() -> Vec<system_check::CheckItem> {
@@ -49,6 +50,31 @@ fn clash_stop() -> Result<(), String> {
     clash_proxy::stop().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn list_skills(install_path: String) -> Vec<skills_manager::SkillInfo> {
+    skills_manager::list_installed(&install_path)
+}
+
+#[tauri::command]
+async fn update_skills(
+    install_path: String,
+    skill_names: Vec<String>,
+    proxy_url: Option<String>,
+) -> Result<(), String> {
+    for skill in &skill_names {
+        let version = skills_manager::fetch_latest_version(
+            skill, proxy_url.as_deref()
+        ).await.map_err(|e| e.to_string())?;
+        skills_manager::update_skill(
+            &install_path, skill, &version, proxy_url.as_deref()
+        ).await.map_err(|e| e.to_string())?;
+    }
+    #[cfg(unix)]
+    skills_manager::send_reload_signal(&install_path)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 fn main() {
     tauri::Builder::default()
@@ -58,7 +84,9 @@ fn main() {
             health_check,
             clash_test,
             clash_start,
-            clash_stop
+            clash_stop,
+            list_skills,
+            update_skills
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
