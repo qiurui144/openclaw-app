@@ -48,3 +48,13 @@ scripts/openclaw.nsi
 src-tauri/target/
 src-tauri/gen/
 node_modules/
+.tauri/
+
+# macOS bundle output
+dist/macos/
+
+# AppImage 打包中间产物
+AppDir/
+appimage-build/
+*.AppImage.zsync
+AppImageBuilder.yml
