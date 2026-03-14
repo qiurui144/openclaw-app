@@ -88,6 +88,17 @@ fn emit_progress(window: &Window, step: u32, total: u32, msg: &str) {
 }
 
 pub async fn start_deploy(config: DeployConfig, window: Window) -> Result<()> {
+    match do_deploy(&config, &window).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = window.emit("deploy:failed", &msg);
+            Err(e)
+        }
+    }
+}
+
+async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     const TOTAL: u32 = 11;
 
     // Step 1: 创建安装目录
@@ -333,41 +344,59 @@ fn install_service(config: &DeployConfig) -> Result<()> {
 }
 
 fn start_service(config: &DeployConfig) -> Result<()> {
-    let elevated = crate::system_check::is_elevated();
+    let node_bin = PathBuf::from(&config.install_path)
+        .join("node").join(if cfg!(windows) { "node.exe" } else { "node" });
+    let script = PathBuf::from(&config.install_path)
+        .join("openclaw_pkg").join("node_modules")
+        .join("openclaw").join("openclaw.mjs");
 
     #[cfg(target_os = "linux")]
     {
-        let (base_cmd, extra_args): (&str, &[&str]) = if elevated {
-            ("systemctl", &["start", "openclaw.service"])
+        // 只有安装了 unit 文件才走 systemctl，否则直接 spawn
+        let elevated = crate::system_check::is_elevated();
+        let unit_exists = if elevated {
+            PathBuf::from("/etc/systemd/system/openclaw.service").exists()
         } else {
-            ("timeout", &["10", "systemctl", "--user", "start", "openclaw.service"])
+            dirs::home_dir()
+                .map(|h| h.join(".config/systemd/user/openclaw.service").exists())
+                .unwrap_or(false)
         };
-        let ok = std::process::Command::new(base_cmd)
-            .args(extra_args)
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
 
-        if !ok {
-            // 回退：直接 spawn node 进程（适用于无 systemd 环境）
-            let node_bin = PathBuf::from(&config.install_path).join("node").join("node");
-            let script = PathBuf::from(&config.install_path)
-                .join("openclaw_pkg").join("node_modules")
-                .join("openclaw").join("openclaw.mjs");
-            std::process::Command::new(&node_bin)
-                .args([script.to_str().unwrap(), "gateway",
-                       "--port", &config.service_port.to_string()])
-                .env("NODE_ENV", "production")
-                .spawn()?;
+        if config.install_service && unit_exists {
+            let ok = if elevated {
+                std::process::Command::new("systemctl")
+                    .args(["start", "openclaw.service"])
+                    .status().map(|s| s.success()).unwrap_or(false)
+            } else {
+                std::process::Command::new("timeout")
+                    .args(["10", "systemctl", "--user", "start", "openclaw.service"])
+                    .status().map(|s| s.success()).unwrap_or(false)
+            };
+            if ok { return Ok(()); }
         }
+
+        // 直接启动进程（未选 systemd 或 systemctl 失败时）
+        std::process::Command::new(&node_bin)
+            .args([script.to_str().unwrap(), "gateway",
+                   "--port", &config.service_port.to_string()])
+            .env("NODE_ENV", "production")
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("启动 OpenClaw 失败: {e}\n节点: {}", node_bin.display()))?;
     }
     #[cfg(target_os = "windows")]
     {
-        // schtasks /Run 对 SYSTEM 任务需要管理员，普通用户任务直接运行
-        std::process::Command::new("schtasks")
-            .args(["/Run", "/TN", "OpenClaw Gateway"])
-            .status()?;
-        let _ = elevated;
+        if config.install_service {
+            let ran = std::process::Command::new("schtasks")
+                .args(["/Run", "/TN", "OpenClaw Gateway"])
+                .status().map(|s| s.success()).unwrap_or(false);
+            if ran { return Ok(()); }
+        }
+        std::process::Command::new(&node_bin)
+            .args([script.to_str().unwrap(), "gateway",
+                   "--port", &config.service_port.to_string()])
+            .env("NODE_ENV", "production")
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("启动 OpenClaw 失败: {e}"))?;
     }
     Ok(())
 }

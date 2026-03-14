@@ -69,7 +69,15 @@ onMounted(async () => {
     ...config.toDto(),
     source_mode: buildSourceMode(),
   };
-  await tauri.startDeploy(dto);
+  try {
+    await tauri.startDeploy(dto);
+  } catch (e: unknown) {
+    // IPC 层错误（Rust panic / 未捕获异常），作为 failed 处理
+    const msg = e instanceof Error ? e.message : String(e);
+    wizard.setDeployStatus("failed");
+    errorReason.value = msg;
+    tauri.clashStop().catch(() => {});
+  }
 });
 
 function buildSourceMode() {

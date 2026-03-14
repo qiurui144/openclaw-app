@@ -13,7 +13,7 @@
 import { ref, watch, nextTick } from "vue";
 
 const props = defineProps<{ logs: string[] }>();
-const open = ref(false);
+const open = ref(true);
 const logEl = ref<HTMLDivElement | null>(null);
 
 watch(() => props.logs.length, async () => {
