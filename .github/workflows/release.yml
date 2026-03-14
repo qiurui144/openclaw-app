@@ -90,19 +90,46 @@ jobs:
       - name: 获取 Windows 内嵌资源
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p resources/binaries/windows
-          curl -fsSL "https://nodejs.org/dist/v22.17.0/node-v22.17.0-win-x64.zip" -o node_win.zip
-          unzip -p node_win.zip "node-v22.17.0-win-x64/node.exe" > resources/binaries/windows/node.exe
+          NODE_VERSION="22.17.0"
+          MIHOMO_VERSION="1.18.7"
+
+          # Node.js
+          echo "=== 下载 Node.js ${NODE_VERSION} ==="
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip" -o node_win.zip
+          unzip -p node_win.zip "node-v${NODE_VERSION}-win-x64/node.exe" > resources/binaries/windows/node.exe
           rm node_win.zip
+
+          # openclaw.tgz
+          echo "=== 下载 openclaw 服务包 ==="
           OC_VERSION=$(npm view openclaw version --registry https://registry.npmmirror.com 2>/dev/null || npm view openclaw version)
           OC_URL=$(npm view "openclaw@${OC_VERSION}" dist.tarball --registry https://registry.npmmirror.com 2>/dev/null || npm view "openclaw@${OC_VERSION}" dist.tarball)
-          echo "下载 openclaw@${OC_VERSION}: ${OC_URL}"
+          echo "openclaw@${OC_VERSION}: ${OC_URL}"
           curl -fL "$OC_URL" -o resources/binaries/windows/openclaw.tgz
-          MIHOMO_VERSION="1.18.7"
-          echo "下载 Windows Mihomo ${MIHOMO_VERSION}..."
+
+          # Mihomo（动态查 ZIP 内 exe 名，防止版本重命名导致 0 字节静默失败）
+          echo "=== 下载 Mihomo ${MIHOMO_VERSION} ==="
           curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-windows-amd64-v${MIHOMO_VERSION}.zip" -o mihomo_win.zip
-          unzip -p mihomo_win.zip "mihomo-windows-amd64.exe" > resources/binaries/windows/mihomo.exe
+          INNER_EXE=$(unzip -Z1 mihomo_win.zip | grep -i '\.exe$' | head -1)
+          if [ -z "$INNER_EXE" ]; then
+            echo "错误：mihomo ZIP 内未找到 .exe 文件" >&2; unzip -Z1 mihomo_win.zip >&2; exit 1
+          fi
+          echo "提取: $INNER_EXE"
+          unzip -p mihomo_win.zip "$INNER_EXE" > resources/binaries/windows/mihomo.exe
           rm mihomo_win.zip
+
+          # 验证所有文件 >1MB，防止空文件被内嵌进 Rust binary
+          echo ""
+          echo "=== 资源清单 ==="
+          ls -lh resources/binaries/windows/
+          for f in resources/binaries/windows/node.exe resources/binaries/windows/openclaw.tgz resources/binaries/windows/mihomo.exe; do
+            bytes=$(wc -c < "$f")
+            if [ "$bytes" -lt 1048576 ]; then
+              echo "错误：$f 过小（${bytes}B），下载失败" >&2; exit 1
+            fi
+          done
+          echo "所有资源验证通过"
 
       - name: 构建 Full Bundle NSIS
         run: npm run tauri build -- --features bundled

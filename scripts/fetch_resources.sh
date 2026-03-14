@@ -72,8 +72,13 @@ fi
 if [[ ! -f "$RESOURCES_DIR/windows/mihomo.exe" ]]; then
   echo "下载 Windows Mihomo ${MIHOMO_VERSION}..."
   curl -fsSL "${MIHOMO_BASE_URL}/mihomo-windows-amd64-v${MIHOMO_VERSION}.zip" -o /tmp/mihomo_win.zip
-  unzip -p /tmp/mihomo_win.zip "mihomo-windows-amd64.exe" > "$RESOURCES_DIR/windows/mihomo.exe" 2>/dev/null \
-    || unzip -p /tmp/mihomo_win.zip > "$RESOURCES_DIR/windows/mihomo.exe"
+  # 动态查 exe 名，防止版本重命名后 unzip -p 输出 0 字节
+  INNER_WIN_EXE=$(unzip -Z1 /tmp/mihomo_win.zip | grep -i '\.exe$' | head -1) || INNER_WIN_EXE=""
+  if [[ -n "$INNER_WIN_EXE" ]]; then
+    unzip -p /tmp/mihomo_win.zip "$INNER_WIN_EXE" > "$RESOURCES_DIR/windows/mihomo.exe"
+  else
+    echo "错误：mihomo Windows ZIP 内未找到 .exe 文件" >&2; exit 1
+  fi
   rm -f /tmp/mihomo_win.zip
 else
   echo "Windows Mihomo 已存在，跳过"
