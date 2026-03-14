@@ -41,6 +41,14 @@ jobs:
           OC_BUILD_BUNDLED: "0"
           OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
 
+      - name: 重命名 Lite AppImage
+        run: |
+          cd src-tauri/target/release/bundle/appimage/
+          for f in *.AppImage; do
+            mv "$f" "${f%.AppImage}-lite.AppImage"
+          done
+          ls -lh *.AppImage
+
       - name: 获取内嵌资源
         run: |
           chmod +x scripts/fetch_resources.sh
@@ -55,9 +63,13 @@ jobs:
           OC_BUILD_BUNDLED: "1"
           OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
 
-      - name: 重命名产物
+      - name: 重命名 Full Bundle AppImage
         run: |
           cd src-tauri/target/release/bundle/appimage/
+          for f in *.AppImage; do
+            [[ "$f" == *-lite.AppImage ]] && continue
+            mv "$f" "${f%.AppImage}-full.AppImage"
+          done
           ls -lh *.AppImage
 
       - uses: actions/upload-artifact@v4
@@ -86,6 +98,15 @@ jobs:
         run: npm run tauri build
         env:
           OC_BUILD_BUNDLED: "0"
+
+      - name: 重命名 Lite NSIS
+        shell: bash
+        run: |
+          cd src-tauri/target/release/bundle/nsis/
+          for f in *.exe; do
+            mv "$f" "${f%.exe}-lite.exe"
+          done
+          ls -lh *.exe
 
       - name: 获取 Windows 内嵌资源
         shell: bash
@@ -135,6 +156,16 @@ jobs:
         run: npm run tauri build -- --features bundled
         env:
           OC_BUILD_BUNDLED: "1"
+
+      - name: 重命名 Full Bundle NSIS
+        shell: bash
+        run: |
+          cd src-tauri/target/release/bundle/nsis/
+          for f in *.exe; do
+            [[ "$f" == *-lite.exe ]] && continue
+            mv "$f" "${f%.exe}-full.exe"
+          done
+          ls -lh *.exe
 
       - uses: actions/upload-artifact@v4
         with:

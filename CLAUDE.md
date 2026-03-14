@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git 权限
+
+本项目允许 `git push`，包括推送 tag（用于触发 CI 自动构建）。
+
 ## 构建命令
 
 ### 依赖安装（Ubuntu 22.04/24.04）
