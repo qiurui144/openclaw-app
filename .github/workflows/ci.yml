@@ -14,19 +14,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-20.04
-            tauri_features: webkit2gtk-4-0
+          - os: ubuntu-24.04
           - os: windows-latest
-            tauri_features: ""
     steps:
       - uses: actions/checkout@v4
 
       - name: 安装 Linux 系统依赖
-        if: matrix.os == 'ubuntu-20.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.0-dev \
+            libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev
@@ -46,7 +44,7 @@ jobs:
           DEP_TAURI_DEV: "true"
 
       - name: cargo check (bundled feature, Linux only)
-        if: matrix.os == 'ubuntu-20.04'
+        if: runner.os == 'Linux'
         working-directory: src-tauri
         run: cargo check --features bundled
         env:
