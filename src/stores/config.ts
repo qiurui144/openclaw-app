@@ -6,6 +6,19 @@ export interface PlatformConfig {
   webhookUrl: string;
 }
 
+export interface AiConfigDto {
+  provider: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+}
+
+/** Rust PlatformEntry 的 JSON 形式：枚举名小写，字段 snake_case */
+export interface PlatformEntry {
+  platform: "wework" | "dingtalk" | "feishu";
+  webhook_url: string;
+}
+
 export interface DeployConfigDto {
   install_path: string;
   service_port: number;
@@ -14,8 +27,15 @@ export interface DeployConfigDto {
   install_service: boolean;
   start_on_boot: boolean;
   source_mode: { type: string; proxy_url?: string; path?: string };
-  platforms: Record<string, PlatformConfig>;
+  platforms: PlatformEntry[];
+  ai_config: AiConfigDto | null;
 }
+
+const PLATFORM_ID_MAP: Record<string, "wework" | "dingtalk" | "feishu"> = {
+  wx: "wework",
+  dt: "dingtalk",
+  fs: "feishu",
+};
 
 export const useConfigStore = defineStore("config", () => {
   const installPath = ref(defaultInstallPath());
@@ -29,10 +49,15 @@ export const useConfigStore = defineStore("config", () => {
   const localZipPath = ref<string | null>(null);
   const platforms = ref<Record<string, PlatformConfig>>({
     wx: { enabled: false, webhookUrl: "" },
-    qq: { enabled: false, webhookUrl: "" },
     dt: { enabled: false, webhookUrl: "" },
     fs: { enabled: false, webhookUrl: "" },
   });
+
+  // AI 模型配置
+  const aiProvider = ref("");
+  const aiBaseUrl  = ref("");
+  const aiApiKey   = ref("");
+  const aiModel    = ref("");
 
   const isPasswordValid = computed(() => {
     const p = adminPassword.value;
@@ -48,6 +73,14 @@ export const useConfigStore = defineStore("config", () => {
   }
 
   function toDto(): DeployConfigDto {
+    // 将 Record<id, PlatformConfig> 转换为 Rust 期望的 Vec<PlatformEntry>
+    const platformEntries: PlatformEntry[] = Object.entries(platforms.value)
+      .filter(([id, p]) => p.enabled && p.webhookUrl && PLATFORM_ID_MAP[id])
+      .map(([id, p]) => ({
+        platform: PLATFORM_ID_MAP[id],
+        webhook_url: p.webhookUrl,
+      }));
+
     return {
       install_path: installPath.value,
       service_port: servicePort.value,
@@ -56,7 +89,11 @@ export const useConfigStore = defineStore("config", () => {
       install_service: installService.value,
       start_on_boot: startOnBoot.value,
       source_mode: { type: "bundled" },
-      platforms: platforms.value,
+      platforms: platformEntries,
+      ai_config: aiApiKey.value
+        ? { provider: aiProvider.value, base_url: aiBaseUrl.value,
+            api_key: aiApiKey.value, model: aiModel.value }
+        : null,
     };
   }
 
@@ -64,6 +101,7 @@ export const useConfigStore = defineStore("config", () => {
     installPath, servicePort, adminPassword, confirmPassword,
     domainName, installService, startOnBoot, clashSubscriptionUrl,
     localZipPath, platforms,
+    aiProvider, aiBaseUrl, aiApiKey, aiModel,
     isPasswordValid, passwordsMatch,
     updatePlatform, toDto,
   };

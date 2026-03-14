@@ -69,6 +69,7 @@ const visibleSteps = computed(() => [
   { label: "来源" },
   { label: "配置" },
   { label: "服务" },
+  { label: "AI" },
   { label: "平台" },
   { label: "部署" },
   { label: "完成" },

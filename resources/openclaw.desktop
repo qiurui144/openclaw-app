@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=OpenClaw 部署向导
+Name[en]=OpenClaw Deploy Wizard
+Comment=OpenClaw 一键部署应用
+Comment[en]=OpenClaw One-Click Deployment Wizard
+Exec=openclaw
+Icon=openclaw
+Type=Application
+Categories=Utility;System;
+StartupNotify=true
+Terminal=false

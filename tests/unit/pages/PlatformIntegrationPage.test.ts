@@ -16,11 +16,11 @@ describe("PlatformIntegrationPage", () => {
     expect(w.canProceed).toBe(true);
   });
 
-  it("显示 4 个平台", async () => {
+  it("显示 3 个平台（企业微信/钉钉/飞书）", async () => {
     const pinia = createPinia();
     const router = createRouter({ history: createWebHistory(), routes: [{ path: "/", component: PlatformIntegrationPage }] });
     const wrapper = mount(PlatformIntegrationPage, { global: { plugins: [pinia, router] } });
     await flushPromises();
-    expect(wrapper.findAll(".platform-card")).toHaveLength(4);
+    expect(wrapper.findAll(".platform-card")).toHaveLength(3);
   });
 });

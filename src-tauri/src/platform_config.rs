@@ -6,7 +6,6 @@ use std::path::PathBuf;
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     WeWork,
-    QqWork,
     DingTalk,
     Feishu,
 }
@@ -14,10 +13,9 @@ pub enum Platform {
 impl Platform {
     pub fn channel_key(&self) -> &'static str {
         match self {
-            Platform::WeWork => "wecom",
-            Platform::QqWork => "qqwork",
-            Platform::DingTalk => "dingtalk",
-            Platform::Feishu => "feishu",
+            Platform::WeWork    => "wecom",
+            Platform::DingTalk  => "dingtalk",
+            Platform::Feishu    => "feishu",
         }
     }
 
@@ -25,8 +23,6 @@ impl Platform {
         match self {
             Platform::WeWork =>
                 "https://work.weixin.qq.com/api/doc/90000/90136/91770",
-            Platform::QqWork =>
-                "https://work.qq.com/",
             Platform::DingTalk =>
                 "https://open.dingtalk.com/document/robots/custom-robot-access",
             Platform::Feishu =>
@@ -112,8 +108,7 @@ mod tests {
 
     #[test]
     fn test_doc_url_not_empty() {
-        for p in [Platform::WeWork, Platform::QqWork,
-                  Platform::DingTalk, Platform::Feishu] {
+        for p in [Platform::WeWork, Platform::DingTalk, Platform::Feishu] {
             assert!(!p.doc_url().is_empty());
             assert!(p.doc_url().starts_with("https://"));
         }

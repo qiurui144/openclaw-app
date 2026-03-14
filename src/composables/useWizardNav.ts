@@ -2,7 +2,7 @@ import { useRouter } from "vue-router";
 import { useWizardStore } from "@/stores/wizard";
 
 const ROUTE_ORDER_BASE = [
-  "welcome", "check", "source", "install", "service", "platform", "deploy", "finish",
+  "welcome", "check", "source", "install", "service", "ai-token", "platform", "deploy", "finish",
 ];
 
 export function useWizardNav() {
@@ -13,7 +13,7 @@ export function useWizardNav() {
     if (wizard.sourceMode === "online") {
       return [
         "welcome", "check", "source", "clash-disclaimer", "clash-config",
-        "install", "service", "platform", "deploy", "finish",
+        "install", "service", "ai-token", "platform", "deploy", "finish",
       ];
     }
     return ROUTE_ORDER_BASE;

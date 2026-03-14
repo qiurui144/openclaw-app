@@ -19,6 +19,16 @@ pub struct DeployConfigDto {
     pub start_on_boot: bool,
     pub source_mode: SourceModeDto,
     pub platforms: Vec<PlatformEntry>,
+    pub ai_config: Option<AiConfigDto>,
+}
+
+/// AI 模型接入配置（OpenAI 兼容接口）
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AiConfigDto {
+    pub provider: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -39,6 +49,7 @@ pub struct DeployConfig {
     pub start_on_boot: bool,
     pub source_mode: SourceMode,
     pub platforms: Vec<PlatformEntry>,
+    pub ai_config: Option<AiConfigDto>,
 }
 
 pub enum SourceMode {
@@ -65,6 +76,7 @@ impl From<DeployConfigDto> for DeployConfig {
                     SourceMode::LocalZip(PathBuf::from(path)),
             },
             platforms: dto.platforms,
+            ai_config: dto.ai_config,
         }
     }
 }
@@ -271,7 +283,19 @@ fn write_main_config(config: &DeployConfig) -> Result<()> {
         gateway["publicUrl"] = serde_json::json!(format!("https://{}", domain));
     }
 
-    let cfg = serde_json::json!({ "gateway": gateway });
+    let mut cfg = serde_json::json!({ "gateway": gateway });
+
+    if let Some(ai) = &config.ai_config {
+        if !ai.api_key.is_empty() {
+            cfg["ai"] = serde_json::json!({
+                "provider": ai.provider,
+                "baseUrl": ai.base_url,
+                "apiKey": ai.api_key,
+                "model": ai.model,
+            });
+        }
+    }
+
     std::fs::write(
         config_dir.join("openclaw.json"),
         serde_json::to_string_pretty(&cfg)?
@@ -618,6 +642,7 @@ mod tests {
             start_on_boot: true,
             source_mode: SourceModeDto::Bundled,
             platforms: vec![],
+            ai_config: None,
         };
         let config = DeployConfig::from(dto);
         // 密码已包装为 Secret，不可直接读取（需 expose_secret()）
@@ -651,6 +676,7 @@ mod tests {
                 path: "/tmp/openclaw.zip".into()
             },
             platforms: vec![],
+            ai_config: None,
         };
         let config = DeployConfig::from(dto);
         assert!(matches!(config.source_mode, SourceMode::LocalZip(_)));

@@ -1,0 +1,73 @@
+services:
+  # ── 编译服务 ──────────────────────────────────────────────
+  # 用途: 在 Ubuntu 20.04 + Qt 5.12 环境内编译，产物安装到 ./AppDir
+  # 运行: docker compose run --rm builder
+  builder:
+    image: openclaw-agents-builder:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+    # host 网络：复用宿主机网络栈，apt-get 稳定可达，且可直连 127.0.0.1 代理
+    network_mode: host
+    volumes:
+      - .:/project
+    working_dir: /project
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - http_proxy=http://127.0.0.1:8889/
+      - https_proxy=http://127.0.0.1:8889/
+      - HTTP_PROXY=http://127.0.0.1:8889/
+      - HTTPS_PROXY=http://127.0.0.1:8889/
+      - ftp_proxy=http://127.0.0.1:8889/
+      - FTP_PROXY=http://127.0.0.1:8889/
+      - no_proxy=localhost,127.0.0.0/8,192.168.0.0/16,10.99.5.0/24,172.17.0.0/16,::1
+      - NO_PROXY=localhost,127.0.0.0/8,192.168.0.0/16,10.99.5.0/24,172.17.0.0/16,::1
+    # 默认执行编译脚本
+    command: bash scripts/docker_build.sh ${APP_VERSION:-1.0.0}
+
+  # ── AppImage 打包服务 ──────────────────────────────────────
+  # 用途: 调用 appimage-builder（需宿主机 .venv 已激活）
+  # 运行: docker compose run --rm appimage
+  appimage:
+    image: openclaw-agents-builder:latest
+    network_mode: host
+    volumes:
+      - .:/project
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /project
+    environment:
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - http_proxy=http://127.0.0.1:8889/
+      - https_proxy=http://127.0.0.1:8889/
+      - HTTP_PROXY=http://127.0.0.1:8889/
+      - HTTPS_PROXY=http://127.0.0.1:8889/
+      - no_proxy=localhost,127.0.0.0/8,192.168.0.0/16,10.99.5.0/24,172.17.0.0/16,::1
+      - NO_PROXY=localhost,127.0.0.0/8,192.168.0.0/16,10.99.5.0/24,172.17.0.0/16,::1
+    command: >
+      bash -c "
+        bash scripts/docker_build.sh ${APP_VERSION:-1.0.0} &&
+        echo 'Build done, run appimage-builder on host'
+      "
+
+  # ── 开发交互环境 ───────────────────────────────────────────
+  # 用途: 进入容器交互调试编译问题
+  # 运行: docker compose run --rm dev bash
+  dev:
+    image: openclaw-agents-builder:latest
+    network_mode: host
+    volumes:
+      - .:/project
+    working_dir: /project
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - http_proxy=http://127.0.0.1:8889/
+      - https_proxy=http://127.0.0.1:8889/
+      - HTTP_PROXY=http://127.0.0.1:8889/
+      - HTTPS_PROXY=http://127.0.0.1:8889/
+      - no_proxy=localhost,127.0.0.0/8,192.168.0.0/16,10.99.5.0/24,172.17.0.0/16,::1
+      - NO_PROXY=localhost,127.0.0.0/8,192.168.0.0/16,10.99.5.0/24,172.17.0.0/16,::1
+    stdin_open: true
+    tty: true
+    command: bash

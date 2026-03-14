@@ -8,6 +8,7 @@ const routes = [
   { path: "/clash-config",      name: "clash-config",      component: () => import("@/pages/ClashConfigPage.vue") },
   { path: "/install",           name: "install",           component: () => import("@/pages/InstallConfigPage.vue") },
   { path: "/service",           name: "service",           component: () => import("@/pages/ServiceConfigPage.vue") },
+  { path: "/ai-token",          name: "ai-token",          component: () => import("@/pages/AiTokenPage.vue") },
   { path: "/platform",          name: "platform",          component: () => import("@/pages/PlatformIntegrationPage.vue") },
   { path: "/deploy",            name: "deploy",            component: () => import("@/pages/DeploymentPage.vue") },
   { path: "/finish",            name: "finish",            component: () => import("@/pages/FinishPage.vue") },
