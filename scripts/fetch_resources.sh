@@ -55,8 +55,32 @@ if [[ "${1:-}" != "--node-only" ]]; then
   fi
 fi
 
+# ── Mihomo（Clash 代理）────────────────────────────────────
+MIHOMO_VERSION="${MIHOMO_VERSION:-1.18.7}"
+MIHOMO_BASE_URL="https://github.com/MetaCubX/mihomo/releases/download/v${MIHOMO_VERSION}"
+
+if [[ ! -f "$RESOURCES_DIR/linux/mihomo" ]]; then
+  echo "下载 Linux Mihomo ${MIHOMO_VERSION}..."
+  curl -fsSL "${MIHOMO_BASE_URL}/mihomo-linux-amd64-v${MIHOMO_VERSION}.gz" -o /tmp/mihomo_linux.gz
+  gunzip -f /tmp/mihomo_linux.gz
+  mv /tmp/mihomo_linux "$RESOURCES_DIR/linux/mihomo"
+  chmod +x "$RESOURCES_DIR/linux/mihomo"
+else
+  echo "Linux Mihomo 已存在，跳过"
+fi
+
+if [[ ! -f "$RESOURCES_DIR/windows/mihomo.exe" ]]; then
+  echo "下载 Windows Mihomo ${MIHOMO_VERSION}..."
+  curl -fsSL "${MIHOMO_BASE_URL}/mihomo-windows-amd64-v${MIHOMO_VERSION}.zip" -o /tmp/mihomo_win.zip
+  unzip -p /tmp/mihomo_win.zip "mihomo-windows-amd64.exe" > "$RESOURCES_DIR/windows/mihomo.exe" 2>/dev/null \
+    || unzip -p /tmp/mihomo_win.zip > "$RESOURCES_DIR/windows/mihomo.exe"
+  rm -f /tmp/mihomo_win.zip
+else
+  echo "Windows Mihomo 已存在，跳过"
+fi
+
 echo ""
 echo "=== 资源清单 ==="
-ls -lh "$RESOURCES_DIR/linux/node" "$RESOURCES_DIR/linux/openclaw.tgz" \
-       "$RESOURCES_DIR/windows/node.exe" "$RESOURCES_DIR/windows/openclaw.tgz" 2>/dev/null || true
+ls -lh "$RESOURCES_DIR/linux/node" "$RESOURCES_DIR/linux/openclaw.tgz" "$RESOURCES_DIR/linux/mihomo" \
+       "$RESOURCES_DIR/windows/node.exe" "$RESOURCES_DIR/windows/openclaw.tgz" "$RESOURCES_DIR/windows/mihomo.exe" 2>/dev/null || true
 echo "================"

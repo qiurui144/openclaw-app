@@ -31,11 +31,25 @@ NODE_BIN="/tmp/oc_node_bin"
 tar -xzf "$NODE_TGZ" -O "node-v${NODE_VERSION}-darwin-${NODE_DL_ARCH}/bin/node" > "$NODE_BIN"
 chmod +x "$NODE_BIN"
 
-# Step 2: 验证 openclaw.tgz 存在（由 CI 预先构建）
+# Step 2: 下载 Mihomo for macOS
+MIHOMO_ARCH="$NODE_ARCH"
+case "$MIHOMO_ARCH" in
+  x86_64) MIHOMO_DL_ARCH="amd64" ;;
+  arm64)  MIHOMO_DL_ARCH="arm64" ;;
+  *)      MIHOMO_DL_ARCH="$MIHOMO_ARCH" ;;
+esac
+MIHOMO_URL="https://github.com/MetaCubX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-darwin-${MIHOMO_DL_ARCH}-v${MIHOMO_VERSION}.gz"
+MIHOMO_BIN="/tmp/oc_mihomo_bin"
+echo "下载 Mihomo ${MIHOMO_VERSION} (${MIHOMO_ARCH} -> ${MIHOMO_DL_ARCH})…"
+curl -fL "$MIHOMO_URL" -o "${MIHOMO_BIN}.gz"
+gunzip -f "${MIHOMO_BIN}.gz"
+chmod +x "$MIHOMO_BIN"
+
+# Step 3: 验证 openclaw.tgz 存在（由 CI 预先构建）
 OC_TGZ="${OC_TGZ_PATH:-resources/openclaw.tgz}"
 [[ -f "$OC_TGZ" ]] || { echo "错误：$OC_TGZ 不存在，请先构建 openclaw 包" >&2; exit 1; }
 
-# Step 3: 合并脚本文件
+# Step 4: 合并脚本文件
 BUNDLE_OUT="$OUT_DIR/install.command"
 echo "合并脚本…"
 
@@ -47,9 +61,10 @@ cat \
   "$SCRIPT_DIR/install_core.sh" \
   > "$BUNDLE_OUT"
 
-# Step 4: 追加内嵌资源（base64 编码）
+# Step 5: 追加内嵌资源（base64 编码）
 echo "编码 Node.js 二进制（$(wc -c < "$NODE_BIN") bytes）…"
 echo "编码 openclaw.tgz（$(wc -c < "$OC_TGZ") bytes）…"
+echo "编码 Mihomo 二进制（$(wc -c < "$MIHOMO_BIN") bytes）…"
 {
   echo ""
   echo "__BUNDLE_DATA__"
@@ -59,15 +74,18 @@ echo "编码 openclaw.tgz（$(wc -c < "$OC_TGZ") bytes）…"
   echo "__BUNDLE_openclaw.tgz__"
   base64 < "$OC_TGZ"
   echo "__END_BUNDLE_openclaw.tgz__"
+  echo "__BUNDLE_mihomo__"
+  base64 < "$MIHOMO_BIN"
+  echo "__END_BUNDLE_mihomo__"
 } >> "$BUNDLE_OUT"
 
 chmod +x "$BUNDLE_OUT"
 
 # 清理
-rm -f "$NODE_TGZ" "$NODE_BIN"
+rm -f "$NODE_TGZ" "$NODE_BIN" "$MIHOMO_BIN"
 
 echo "=== 打包完成：$BUNDLE_OUT ==="
 echo "大小：$(du -sh "$BUNDLE_OUT" | cut -f1)"
 
-# Step 5: 验证脚本语法
+# Step 6: 验证脚本语法
 bash -n "$BUNDLE_OUT" && echo "语法检查：通过"

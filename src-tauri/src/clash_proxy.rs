@@ -17,27 +17,45 @@ pub struct ClashTestResult {
     pub error: Option<String>,
 }
 
-/// Mihomo 二进制路径（内置资源）
+/// Mihomo 二进制路径
 fn mihomo_bin_path() -> PathBuf {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    #[cfg(target_os = "linux")]
-    return exe_dir.join("clash").join("mihomo-linux-amd64");
+    let clash_dir = std::env::temp_dir().join("openclaw_clash");
     #[cfg(target_os = "windows")]
-    return exe_dir.join("clash").join("mihomo-windows-amd64.exe");
-    #[cfg(target_os = "macos")]
-    {
-        let arch = match std::env::consts::ARCH {
-            "x86_64" => "amd64",
-            _ => "arm64",
-        };
-        return exe_dir.join("clash").join(format!("mihomo-darwin-{}", arch));
+    return clash_dir.join("mihomo.exe");
+    #[cfg(not(target_os = "windows"))]
+    return clash_dir.join("mihomo");
+}
+
+/// 确保 mihomo 二进制可用（bundled 模式从内嵌资源提取）
+fn ensure_mihomo_binary() -> Result<PathBuf> {
+    let bin = mihomo_bin_path();
+    if bin.exists() {
+        return Ok(bin);
     }
-    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-    return exe_dir.join("clash").join("mihomo");
+
+    if let Some(p) = bin.parent() {
+        std::fs::create_dir_all(p)?;
+    }
+
+    #[cfg(feature = "bundled")]
+    {
+        #[cfg(target_os = "linux")]
+        let data = include_bytes!("../../resources/binaries/linux/mihomo");
+        #[cfg(target_os = "windows")]
+        let data = include_bytes!("..\\..\\resources\\binaries\\windows\\mihomo.exe");
+
+        std::fs::write(&bin, &data[..])?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin,
+                std::fs::Permissions::from_mode(0o755))?;
+        }
+        return Ok(bin);
+    }
+
+    #[cfg(not(feature = "bundled"))]
+    anyhow::bail!("Mihomo 二进制不存在: {}。请使用 Full Bundle 版本或手动放置。", bin.display());
 }
 
 /// 保存订阅 URL 供 Skills 更新复用
@@ -78,17 +96,8 @@ pub async fn start(subscription_url: &str) -> Result<String> {
     let config_path = config_dir.join("config.yaml");
     std::fs::write(&config_path, &config_data)?;
 
-    // 3. 启动 Mihomo 进程
-    let bin = mihomo_bin_path();
-    anyhow::ensure!(bin.exists(),
-        "Mihomo 二进制不存在: {}", bin.display());
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&bin,
-            std::fs::Permissions::from_mode(0o755))?;
-    }
+    // 3. 确保 Mihomo 二进制可用（bundled 模式自动提取）
+    let bin = ensure_mihomo_binary()?;
 
     let child = std::process::Command::new(&bin)
         .args(["-d", config_dir.to_str().unwrap()])

@@ -54,7 +54,22 @@ clash_disclaimer() {
   [[ "$answer" == "agree" ]]
 }
 
-# 下载 Mihomo 二进制
+# 从 bundle 提取 Mihomo（如果内嵌了 __BUNDLE_mihomo__）
+clash_extract_bundled_mihomo() {
+  local script_path="${BASH_SOURCE[0]:-$0}"
+  if grep -q "__BUNDLE_mihomo__" "$script_path" 2>/dev/null; then
+    mkdir -p "$CLASH_DIR"
+    echo "从 Bundle 提取 Mihomo…"
+    sed -n '/^__BUNDLE_mihomo__$/,/^__END_BUNDLE_mihomo__$/p' "$script_path" \
+      | sed '1d;$d' | base64 -d > "$CLASH_BIN"
+    chmod +x "$CLASH_BIN"
+    echo "Mihomo 已从 Bundle 提取"
+    return 0
+  fi
+  return 1
+}
+
+# 下载 Mihomo 二进制（在线回退）
 clash_download_mihomo() {
   local arch; arch=$(uname -m)
   local url; url=$(clash_mihomo_url "$arch") || return 1
@@ -79,8 +94,8 @@ clash_fetch_config() {
 # 启动 Mihomo
 clash_start() {
   local sub_url="$1"
-  # 下载二进制（若不存在）
-  [[ -x "$CLASH_BIN" ]] || clash_download_mihomo || return 1
+  # 获取二进制：优先 bundle 提取，回退在线下载
+  [[ -x "$CLASH_BIN" ]] || clash_extract_bundled_mihomo || clash_download_mihomo || return 1
   # 获取订阅
   clash_fetch_config "$sub_url" || return 1
   clash_save_sub "$sub_url"

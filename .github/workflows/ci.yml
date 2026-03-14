@@ -48,6 +48,7 @@ jobs:
         run: |
           mkdir -p resources/binaries/linux resources/binaries/windows
           touch resources/binaries/linux/node resources/binaries/windows/node.exe
+          touch resources/binaries/linux/mihomo resources/binaries/windows/mihomo.exe
           echo '{}' > resources/binaries/linux/openclaw.tgz
           echo '{}' > resources/binaries/windows/openclaw.tgz
 
