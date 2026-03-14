@@ -34,6 +34,7 @@ pub fn load() -> Option<SessionState> {
     serde_json::from_str(&data).ok()
 }
 
+#[allow(dead_code)]
 pub fn save(state: &SessionState) -> Result<()> {
     let path = session_path();
     if let Some(parent) = path.parent() {

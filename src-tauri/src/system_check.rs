@@ -36,6 +36,7 @@ pub fn is_elevated() -> bool {
     { false }
 }
 
+#[allow(clippy::needless_return)]
 fn check_privilege() -> CheckItem {
     let elevated = is_elevated();
     #[cfg(target_os = "linux")]
@@ -75,6 +76,7 @@ fn check_privilege() -> CheckItem {
     }
 }
 
+#[allow(clippy::needless_return)]
 fn check_os_version() -> CheckItem {
     #[cfg(target_os = "linux")]
     {
@@ -159,7 +161,8 @@ fn check_disk_space() -> CheckItem {
             let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
             let ret = unsafe { libc::statvfs(path_cstr.as_ptr(), &mut stat) };
             if ret == 0 {
-                (stat.f_bavail as u64 * stat.f_frsize as u64) / (1024 * 1024)
+                #[allow(clippy::unnecessary_cast)]
+                { (stat.f_bavail as u64 * stat.f_frsize as u64) / (1024 * 1024) }
             } else {
                 0
             }

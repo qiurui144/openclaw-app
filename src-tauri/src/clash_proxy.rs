@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::process::Child;
@@ -73,6 +73,7 @@ fn save_subscription_url(url: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn load_subscription_url() -> Option<String> {
     let path = dirs::home_dir()?
         .join(".openclaw")

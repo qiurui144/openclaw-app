@@ -58,8 +58,8 @@ NODE_ARCH=x86_64 bash scripts/macos/build_bundle.sh  # Intel
 ## 测试
 
 ```bash
-npm test                                             # 前端 Vitest（25 tests）
-cd src-tauri && DEP_TAURI_DEV=true cargo test        # Rust 单元测试（23 tests）
+npm test                                             # 前端 Vitest（27 tests）
+cd src-tauri && DEP_TAURI_DEV=true cargo test        # Rust 单元测试（25 tests）
 bats tests/macos/                                    # macOS bash 脚本测试（12 tests）
 
 # 单独运行某个 Rust 测试
@@ -86,14 +86,16 @@ resources/binaries/
 
 ```
 src-tauri/src/           # Rust 后端
-├── main.rs              # 入口 + 17 个 Tauri IPC commands
+├── main.rs              # 入口 + 21 个 Tauri IPC commands
 ├── deploy.rs            # 11 步部署引擎（三模式）
 ├── system_check.rs      # OS/磁盘/端口检查（跨平台）
 ├── clash_proxy.rs       # Mihomo 临时代理管理
 ├── skills_manager.rs    # Skills .tgz 原子更新
 ├── updater.rs           # GitHub Release 更新 + 回滚
 ├── session_state.rs     # 断点续传状态
-└── platform_config.rs   # 企业微信/钉钉/飞书配置
+├── platform_config.rs   # 企业微信/钉钉/飞书配置
+├── service_ctrl.rs      # 服务启停控制（systemctl / 直接进程）
+└── tray.rs              # 系统托盘图标 + 30s 状态轮询
 
 src/                     # Vue 3 前端
 ├── pages/               # 10 个向导页面

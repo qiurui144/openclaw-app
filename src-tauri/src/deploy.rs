@@ -1,5 +1,5 @@
 use anyhow::Result;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::Secret;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Window};
@@ -123,25 +123,25 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     const TOTAL: u32 = 11;
 
     // Step 1: 创建安装目录
-    emit_progress(&window, 1, TOTAL, "创建安装目录…");
+    emit_progress(window, 1, TOTAL, "创建安装目录…");
     std::fs::create_dir_all(&config.install_path)?;
 
     // Step 2-4: 获取并解包资源（因 SourceMode 不同行为差异）
-    emit_progress(&window, 2, TOTAL, "获取 Node.js 运行时…");
-    acquire_node(&config).await?;
+    emit_progress(window, 2, TOTAL, "获取 Node.js 运行时…");
+    acquire_node(config).await?;
 
-    emit_progress(&window, 3, TOTAL, "获取 OpenClaw 安装包…");
-    acquire_openclaw_package(&config).await?;
+    emit_progress(window, 3, TOTAL, "获取 OpenClaw 安装包…");
+    acquire_openclaw_package(config).await?;
 
-    emit_progress(&window, 4, TOTAL, "解包 OpenClaw（含所有依赖，请稍候）…");
-    extract_openclaw(&config)?;
+    emit_progress(window, 4, TOTAL, "解包 OpenClaw（含所有依赖，请稍候）…");
+    extract_openclaw(config)?;
 
     // Step 5: 写入主配置
-    emit_progress(&window, 5, TOTAL, "写入配置文件…");
-    write_main_config(&config)?;
+    emit_progress(window, 5, TOTAL, "写入配置文件…");
+    write_main_config(config)?;
 
     // Step 6: 写入平台集成配置
-    emit_progress(&window, 6, TOTAL, "写入平台集成配置…");
+    emit_progress(window, 6, TOTAL, "写入平台集成配置…");
     crate::platform_config::write_platform_config(
         &config.install_path,
         PlatformConfigs {
@@ -154,8 +154,8 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
 
     // Step 7: 注册系统服务（失败不阻断部署，仅记录警告）
     if config.install_service {
-        emit_progress(&window, 7, TOTAL, "注册系统服务…");
-        if let Err(e) = install_service(&config) {
+        emit_progress(window, 7, TOTAL, "注册系统服务…");
+        if let Err(e) = install_service(config) {
             let _ = window.emit("deploy:progress", DeployProgress {
                 step: 7, total: TOTAL, percent: 63,
                 message: format!("系统服务注册失败（{}），将直接启动进程", e),
@@ -164,8 +164,8 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     }
 
     // Step 8: 启动服务
-    emit_progress(&window, 8, TOTAL, "启动 OpenClaw 服务…");
-    start_service(&config)?;
+    emit_progress(window, 8, TOTAL, "启动 OpenClaw 服务…");
+    start_service(config)?;
 
     // Step 9: 健康检查（每 2 秒更新进度）
     for i in 0..15u32 {
@@ -178,12 +178,10 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
             std::time::Duration::from_secs(1),
             tokio::net::TcpStream::connect(format!("127.0.0.1:{}", config.service_port))
         ).await.map(|r| r.is_ok()).unwrap_or(false);
-        if ok {
-            if reqwest::get(format!("http://127.0.0.1:{}/health", config.service_port))
-                .await.map(|r| r.status().is_success()).unwrap_or(false)
-            {
-                break;
-            }
+        if ok && reqwest::get(format!("http://127.0.0.1:{}/health", config.service_port))
+            .await.map(|r| r.status().is_success()).unwrap_or(false)
+        {
+            break;
         }
         if i == 14 {
             anyhow::bail!("服务在 30 秒内未能正常启动，请查看日志");
@@ -192,12 +190,12 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     }
 
     // Step 10: 生成卸载脚本
-    emit_progress(&window, 10, TOTAL, "生成卸载脚本…");
-    write_uninstall_script(&config)?;
+    emit_progress(window, 10, TOTAL, "生成卸载脚本…");
+    write_uninstall_script(config)?;
 
     // Step 11: 写入安装记录
-    emit_progress(&window, 11, TOTAL, "完成！");
-    write_deploy_meta(&config)?;
+    emit_progress(window, 11, TOTAL, "完成！");
+    write_deploy_meta(config)?;
     crate::session_state::clear(Some(&config.install_path))?;
 
     let _ = window.emit("deploy:done", ());
@@ -449,13 +447,11 @@ pub async fn health_check(port: u16) -> Result<()> {
             tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
         ).await.map(|r| r.is_ok()).unwrap_or(false);
 
-        if has_listener {
-            if reqwest::get(&url).await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false)
-            {
-                return Ok(());
-            }
+        if has_listener && reqwest::get(&url).await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+        {
+            return Ok(());
         }
         if i < 14 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -646,6 +642,7 @@ fn extract_from_zip(zip_path: &PathBuf, entry_name: &str, dest: &PathBuf) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::ExposeSecret;
 
     #[test]
     fn test_dto_to_config_conversion() {
