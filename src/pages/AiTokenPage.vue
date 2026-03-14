@@ -217,7 +217,7 @@ function onKeyInput() {
 
 function openDocs(p: Provider) {
   if (p.docsUrl) {
-    tauri.openUrl(p.docsUrl).catch(() => { window.open(p.docsUrl, "_blank"); });
+    tauri.openUrl(p.docsUrl).catch(() => {});
   }
 }
 

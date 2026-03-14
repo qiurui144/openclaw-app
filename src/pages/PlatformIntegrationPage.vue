@@ -273,7 +273,7 @@ function onToggle(platform: string) {
 }
 
 function openUrl(url: string) {
-  tauri.openUrl(url).catch(() => { window.open(url, "_blank"); });
+  tauri.openUrl(url).catch(() => {}); // 不能用 window.open，Tauri WebView 会自行导航到外部 URL
 }
 
 function copyCallback() {
