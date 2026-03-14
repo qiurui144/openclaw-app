@@ -17,22 +17,27 @@
               <span class="p-icon">💼</span>
               <span class="p-name">企业微信</span>
               <span class="p-badge">自建应用</span>
+              <span class="p-badge admin">仅企业管理员</span>
             </label>
-            <button v-if="config.wecomEnabled" class="open-btn" @click="openUrl('https://work.weixin.qq.com/wework_admin/frame#apps')">
-              🌐 打开企业微信后台
+            <button v-if="config.wecomEnabled" class="open-btn" @click="openUrl(PLATFORM_URLS.wecom)">
+              🌐 企业微信接入向导
             </button>
             <span v-else class="toggle-hint">点击启用</span>
           </div>
 
           <div v-if="config.wecomEnabled" class="expanded-area">
+            <div class="warn-notice">
+              <strong>⚠️ 需要企业管理员权限：</strong>
+              企业微信需使用管理员账号登录企业微信后台，获取企业 ID 和应用凭据，个人账号无法完成此配置。
+            </div>
             <div class="steps-guide">
               <div class="steps-label">操作步骤</div>
               <ol class="step-list">
-                <li>登录<strong>企业微信管理后台</strong>（work.weixin.qq.com），进入「应用管理」→「应用」</li>
-                <li>点击「创建应用」，类型选「自建」，填写应用名称</li>
-                <li>在应用详情页获取 <strong>AgentId</strong>（数字），在「企业信息」页获取 <strong>企业 ID (corpId)</strong></li>
-                <li>在应用「Secret」处点击「查看」并获取 <strong>App Secret (corpSecret)</strong>，填入下方</li>
-                <li>在「接收消息」→「API 接收」中配置 Token 和 EncodingAESKey（OpenClaw 安装后填入）</li>
+                <li>以<strong>企业管理员</strong>身份登录企业微信管理后台（work.weixin.qq.com），进入「应用管理」→「应用」</li>
+                <li>点击「创建应用」→「自建」，填写应用名称后创建</li>
+                <li>在应用详情页获取 <strong>AgentId</strong>（数字），在「我的企业」→「企业信息」获取 <strong>企业 ID (corpId)</strong></li>
+                <li>在应用详情页点击「Secret」→「查看」，获取 <strong>corpSecret</strong>，填入下方</li>
+                <li>OpenClaw 采用长连接模式，<strong>无需公网 IP</strong>，安装完成后自动建立连接</li>
               </ol>
             </div>
             <div class="input-section">
@@ -70,25 +75,25 @@
               <span class="p-icon">⚙️</span>
               <span class="p-name">钉钉</span>
               <span class="p-badge blue">Stream 长连接</span>
+              <span class="p-badge personal">个人可用</span>
             </label>
-            <button v-if="config.dingtalkEnabled" class="open-btn" @click="openUrl('https://open-dev.dingtalk.com/fe/app')">
-              🌐 打开钉钉开放平台
+            <button v-if="config.dingtalkEnabled" class="open-btn" @click="openUrl(PLATFORM_URLS.dingtalk)">
+              🌐 钉钉接入文档
             </button>
             <span v-else class="toggle-hint">点击启用</span>
           </div>
 
           <div v-if="config.dingtalkEnabled" class="expanded-area">
             <div class="info-notice">
-              <strong>💡 Stream 长连接模式：</strong>钉钉官方推荐方式，OpenClaw 主动连接钉钉，无需公网 IP 和回调配置。
+              <strong>💡 个人开发者可直接接入：</strong>无需企业管理员，使用个人钉钉账号在开放平台创建应用即可。Stream 长连接模式下无需公网 IP。
             </div>
             <div class="steps-guide">
-              <div class="steps-label">操作步骤</div>
+              <div class="steps-label">操作步骤（参考钉钉官方 OpenClaw 接入文档）</div>
               <ol class="step-list">
-                <li>访问<strong>钉钉开放平台</strong>（open-dev.dingtalk.com），登录后点击「创建应用」→「企业内部应用」→「钉钉应用」</li>
-                <li>在「基础信息」页获取 <strong>AppKey (ClientID)</strong> 和 <strong>AppSecret (ClientSecret)</strong></li>
-                <li>在「消息推送」→「机器人」中启用机器人，填写名称和描述</li>
-                <li>在「消息接收模式」中选择「Stream 模式」（推荐，无需回调地址）</li>
-                <li>发布应用后，将应用分享给所需群或人员</li>
+                <li>访问<strong>钉钉开放平台</strong>（open.dingtalk.com），使用<strong>个人钉钉账号</strong>登录，点击「创建应用」→「企业内部应用」→「钉钉应用」</li>
+                <li>在「基础信息」获取 <strong>AppKey (ClientID)</strong> 和 <strong>AppSecret (ClientSecret)</strong>，填入下方</li>
+                <li>在「消息推送」→「机器人」启用机器人；消息接收模式选「<strong>Stream 模式</strong>」（推荐）</li>
+                <li>应用创建后即可在开发态使用，<strong>正式发布</strong>给组织成员需组织管理员审批</li>
               </ol>
             </div>
             <div class="input-section">
@@ -122,25 +127,25 @@
               <span class="p-icon">🪁</span>
               <span class="p-name">飞书</span>
               <span class="p-badge blue">WebSocket 长连接</span>
+              <span class="p-badge semi">需飞书企业账号</span>
             </label>
-            <button v-if="config.feishuEnabled" class="open-btn" @click="openUrl('https://open.feishu.cn/app')">
-              🌐 打开飞书开放平台
+            <button v-if="config.feishuEnabled" class="open-btn" @click="openUrl(PLATFORM_URLS.feishu)">
+              🌐 飞书接入专题
             </button>
             <span v-else class="toggle-hint">点击启用</span>
           </div>
 
           <div v-if="config.feishuEnabled" class="expanded-area">
             <div class="info-notice">
-              <strong>💡 WebSocket 长连接模式：</strong>无需公网 IP 和回调地址，OpenClaw 主动连接飞书云端，实现双向对话。
+              <strong>💡 WebSocket 长连接，无需公网 IP：</strong>需要飞书企业账号（个人账号可免费创建测试企业）。企业管理员审批后可正式发布给成员使用。
             </div>
             <div class="steps-guide">
-              <div class="steps-label">操作步骤</div>
+              <div class="steps-label">操作步骤（参考飞书 OpenClaw 接入专题）</div>
               <ol class="step-list">
-                <li>访问<strong>飞书开放平台</strong>（open.feishu.cn），登录并点击「创建应用」→「自建应用」</li>
-                <li>在「凭证与基础信息」页获取 <strong>App ID</strong> 和 <strong>App Secret</strong>，填入下方</li>
-                <li>在「添加应用能力」中启用「机器人」</li>
-                <li>在「事件订阅」→「事件配置」中添加 <code>im.message.receive_v1</code>，订阅方式选「<strong>长连接</strong>」</li>
-                <li>创建版本并发布上线（企业自建应用通常秒审核）</li>
+                <li>访问<strong>飞书开放平台</strong>（open.feishu.cn），使用<strong>飞书企业账号</strong>登录（无企业可免费创建测试企业）</li>
+                <li>点击「创建应用」→「自建应用」，在「凭证与基础信息」获取 <strong>App ID</strong> 和 <strong>App Secret</strong>，填入下方</li>
+                <li>在「添加应用能力」启用「机器人」；在「事件订阅」→「事件配置」添加 <code>im.message.receive_v1</code>，订阅方式选「<strong>长连接</strong>」</li>
+                <li>申请权限并创建版本发布，<strong>正式上线</strong>需企业管理员审批（测试成员无需审批即可使用）</li>
               </ol>
             </div>
             <div class="input-section">
@@ -174,25 +179,26 @@
               <span class="p-icon">🐧</span>
               <span class="p-name">QQ 机器人</span>
               <span class="p-badge warn">需公网回调</span>
+              <span class="p-badge personal">个人可用</span>
             </label>
-            <button v-if="config.qqEnabled" class="open-btn" @click="openUrl('https://bot.q.qq.com/')">
-              🌐 打开 QQ 开放平台
+            <button v-if="config.qqEnabled" class="open-btn" @click="openUrl(PLATFORM_URLS.qq)">
+              🌐 QQ 机器人接入
             </button>
             <span v-else class="toggle-hint">点击启用</span>
           </div>
 
           <div v-if="config.qqEnabled" class="expanded-area">
             <div class="warn-notice">
-              <strong>⚠️ QQ 使用回调推送模式：</strong>
-              需要服务器有公网 IP 或域名，QQ 平台会主动推送消息到 OpenClaw 的回调地址。
+              <strong>⚠️ 个人可用，但需公网 IP：</strong>
+              使用普通 QQ 账号即可在开放平台创建机器人。QQ 平台采用回调推送，服务器需有公网 IP 或域名。
             </div>
             <div class="steps-guide">
-              <div class="steps-label">操作步骤</div>
+              <div class="steps-label">操作步骤（通过 QQ 机器人 OpenClaw 专属页）</div>
               <ol class="step-list">
-                <li>访问 <strong>bot.q.qq.com</strong>，登录并创建机器人应用（QQ 账号即可）</li>
-                <li>在应用详情页获取 <strong>AppID</strong> 和 <strong>AppSecret</strong>，填入下方</li>
-                <li>OpenClaw 安装完成后，将回调地址 <code>{{ callbackUrl }}</code> 填入 QQ 开放平台「回调配置」</li>
-                <li>OpenClaw 自动处理 ED25519 签名验证，等待平台审核通过</li>
+                <li>访问 <strong>q.qq.com/qqbot/openclaw/login.html</strong>，使用 <strong>QQ 账号</strong>（无需企业资质）授权登录</li>
+                <li>按页面引导创建机器人，获取 <strong>AppID</strong> 和 <strong>AppSecret</strong>，填入下方</li>
+                <li>OpenClaw 安装完成后，将回调地址 <code>{{ callbackUrl }}</code> 填入「回调配置」</li>
+                <li>OpenClaw 自动处理 ED25519 签名验证；审核通过前仅沙箱测试成员可用</li>
               </ol>
             </div>
             <div class="input-section">
@@ -245,11 +251,12 @@ const showDingtalkSecret = ref(false);
 const showFeishuSecret   = ref(false);
 const showQqSecret       = ref(false);
 
+// 各平台 OpenClaw 专属接入页（优先使用平台官方专属页，引导用户完成接入）
 const PLATFORM_URLS: Record<string, string> = {
-  wecom:    "https://work.weixin.qq.com/wework_admin/frame#apps",
-  dingtalk: "https://open-dev.dingtalk.com/fe/app",
-  feishu:   "https://open.feishu.cn/app",
-  qq:       "https://bot.q.qq.com/",
+  wecom:    "https://work.weixin.qq.com/nl/index/openclaw",       // 企业微信 OpenClaw 专属页
+  dingtalk: "https://open.dingtalk.com/document/dingstart/install-openclaw-locally", // 钉钉官方 OpenClaw 文档
+  feishu:   "https://www.feishu.cn/content/topic/openclaw",       // 飞书 OpenClaw 专题汇总页
+  qq:       "https://q.qq.com/qqbot/openclaw/login.html",         // QQ 机器人 OpenClaw 专属登录页
 };
 
 const callbackUrl = computed(() => {
@@ -312,8 +319,11 @@ h2 { font-size: 20px; font-weight: 700; }
   margin-left: 6px; background: #f1f5f9; color: #64748b;
   font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600;
 }
-.p-badge.blue { background: #eff6ff; color: #3b82f6; }
-.p-badge.warn { background: #fffbeb; color: #d97706; }
+.p-badge.blue   { background: #eff6ff; color: #3b82f6; }
+.p-badge.warn   { background: #fffbeb; color: #d97706; }
+.p-badge.admin  { background: #fef2f2; color: #dc2626; }
+.p-badge.personal { background: #f0fdf4; color: #16a34a; }
+.p-badge.semi   { background: #fefce8; color: #ca8a04; }
 .toggle-hint { margin-left: auto; font-size: 12px; color: var(--color-muted); }
 
 .open-btn {
