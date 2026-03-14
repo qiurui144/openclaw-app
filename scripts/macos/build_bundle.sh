@@ -10,19 +10,25 @@ NODE_VERSION="${NODE_VERSION:-22.17.0}"
 NODE_ARCH="${NODE_ARCH:-arm64}"
 MIHOMO_VERSION="${MIHOMO_VERSION:-1.18.7}"
 
+# Node.js 使用 x64 而非 x86_64
+case "$NODE_ARCH" in
+  x86_64) NODE_DL_ARCH="x64" ;;
+  *)      NODE_DL_ARCH="$NODE_ARCH" ;;
+esac
+
 mkdir -p "$OUT_DIR"
 
 echo "=== OpenClaw macOS Full Bundle 打包 ==="
 
 # Step 1: 下载 Node.js for macOS
-NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-${NODE_ARCH}.tar.gz"
+NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-${NODE_DL_ARCH}.tar.gz"
 NODE_TGZ="/tmp/oc_node_macos.tar.gz"
-echo "下载 Node.js ${NODE_VERSION} (${NODE_ARCH})…"
+echo "下载 Node.js ${NODE_VERSION} (${NODE_ARCH} -> ${NODE_DL_ARCH})…"
 curl -fL "$NODE_URL" -o "$NODE_TGZ"
 
 # 提取 node 二进制
 NODE_BIN="/tmp/oc_node_bin"
-tar -xzf "$NODE_TGZ" -O "node-v${NODE_VERSION}-darwin-${NODE_ARCH}/bin/node" > "$NODE_BIN"
+tar -xzf "$NODE_TGZ" -O "node-v${NODE_VERSION}-darwin-${NODE_DL_ARCH}/bin/node" > "$NODE_BIN"
 chmod +x "$NODE_BIN"
 
 # Step 2: 验证 openclaw.tgz 存在（由 CI 预先构建）
