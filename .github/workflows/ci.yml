@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+          - os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Linux 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --no-default-features
+        env:
+          DEP_TAURI_DEV: "true"
+
+      - name: 创建 bundled 编译占位资源
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p resources/binaries/linux resources/binaries/windows
+          touch resources/binaries/linux/node resources/binaries/windows/node.exe
+          echo '{}' > resources/binaries/linux/openclaw.tgz
+          echo '{}' > resources/binaries/windows/openclaw.tgz
+
+      - name: cargo check (bundled feature, Linux only)
+        if: runner.os == 'Linux'
+        working-directory: src-tauri
+        run: cargo check --features bundled
+        env:
+          DEP_TAURI_DEV: "true"
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --no-default-features 2>&1
+        env:
+          DEP_TAURI_DEV: "true"
+
+  frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行 Vitest
+        run: npm test
+
+      - name: 构建检查
+        run: npm run build
+
+  macos-scripts:
+    name: macOS Scripts (shellcheck + bats)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 shellcheck 和 bats-core
+        run: brew install shellcheck bats-core
+
+      - name: shellcheck
+        run: shellcheck -x scripts/macos/*.sh scripts/macos/install.command
+
+      - name: bats 测试
+        run: bats tests/macos/
