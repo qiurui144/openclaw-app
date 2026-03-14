@@ -37,11 +37,19 @@ pub struct PlatformEntry {
     pub webhook_url: String,
 }
 
+/// QQ 开放平台机器人凭据（与普通 Webhook 平台不同，需要 AppID + AppSecret）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct QqConfig {
+    pub app_id: String,
+    pub app_secret: String,  // 用于 ED25519 签名验证和换取 AccessToken
+}
+
 pub fn write_platform_config(
     install_path: &str,
     platforms: &[PlatformEntry],
+    qq: Option<&QqConfig>,
 ) -> Result<()> {
-    write_platform_config_to(config_dir(), install_path, platforms)
+    write_platform_config_to(config_dir(), install_path, platforms, qq)
 }
 
 fn config_dir() -> PathBuf {
@@ -54,8 +62,9 @@ fn write_platform_config_to(
     config_dir: PathBuf,
     _install_path: &str,
     platforms: &[PlatformEntry],
+    qq: Option<&QqConfig>,
 ) -> Result<()> {
-    if platforms.is_empty() { return Ok(()); }
+    if platforms.is_empty() && qq.is_none() { return Ok(()); }
 
     let config_path = config_dir.join("openclaw.json");
 
@@ -77,6 +86,21 @@ fn write_platform_config_to(
             entry.platform.channel_key().to_string(),
             serde_json::json!({ "webhookUrl": entry.webhook_url }),
         );
+    }
+
+    // QQ 机器人使用 AppID + AppSecret（ED25519 签名验证），而非 webhookUrl
+    if let Some(q) = qq {
+        if !q.app_id.is_empty() && !q.app_secret.is_empty() {
+            channels_map.insert(
+                "qq".to_string(),
+                serde_json::json!({
+                    "appId": q.app_id,
+                    "appSecret": q.app_secret,
+                    // 回调路径由 OpenClaw 服务固定提供，用户需将此路径注册到 QQ 开放平台
+                    "callbackPath": "/webhook/qq",
+                }),
+            );
+        }
     }
 
     config["channels"] = serde_json::Value::Object(channels_map);
@@ -130,7 +154,7 @@ mod tests {
                 webhook_url: "https://open.feishu.cn/hook/test".into(),
             },
         ];
-        write_platform_config_to(config_dir.clone(), "/tmp/install", &entries).unwrap();
+        write_platform_config_to(config_dir.clone(), "/tmp/install", &entries, None).unwrap();
 
         let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&data).unwrap();
@@ -140,10 +164,29 @@ mod tests {
     }
 
     #[test]
+    fn test_write_qq_config() {
+        let tmp = make_temp_dir();
+        let config_dir = tmp.join(".openclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let qq = QqConfig {
+            app_id: "12345678".into(),
+            app_secret: "my_secret".into(),
+        };
+        write_platform_config_to(config_dir.clone(), "/tmp/install", &[], Some(&qq)).unwrap();
+
+        let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(v["channels"]["qq"]["appId"], "12345678");
+        assert_eq!(v["channels"]["qq"]["callbackPath"], "/webhook/qq");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
     fn test_write_empty_platforms_is_noop() {
         let tmp = make_temp_dir();
         let config_dir = tmp.join(".openclaw");
-        let result = write_platform_config_to(config_dir.clone(), "/tmp/install", &[]);
+        let result = write_platform_config_to(config_dir.clone(), "/tmp/install", &[], None);
         assert!(result.is_ok());
         assert!(!config_dir.join("openclaw.json").exists());
         std::fs::remove_dir_all(&tmp).ok();

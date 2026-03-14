@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Window};
 
-use crate::platform_config::PlatformEntry;
+use crate::platform_config::{PlatformEntry, QqConfig};
 #[allow(unused_imports)]
 use crate::session_state::{SessionState, DownloadedFile};
 
@@ -19,6 +19,7 @@ pub struct DeployConfigDto {
     pub start_on_boot: bool,
     pub source_mode: SourceModeDto,
     pub platforms: Vec<PlatformEntry>,
+    pub qq_config: Option<QqConfig>,
     pub ai_config: Option<AiConfigDto>,
 }
 
@@ -49,6 +50,7 @@ pub struct DeployConfig {
     pub start_on_boot: bool,
     pub source_mode: SourceMode,
     pub platforms: Vec<PlatformEntry>,
+    pub qq_config: Option<QqConfig>,
     pub ai_config: Option<AiConfigDto>,
 }
 
@@ -76,6 +78,7 @@ impl From<DeployConfigDto> for DeployConfig {
                     SourceMode::LocalZip(PathBuf::from(path)),
             },
             platforms: dto.platforms,
+            qq_config: dto.qq_config,
             ai_config: dto.ai_config,
         }
     }
@@ -134,7 +137,7 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     // Step 6: 写入平台集成配置
     emit_progress(&window, 6, TOTAL, "写入平台集成配置…");
     crate::platform_config::write_platform_config(
-        &config.install_path, &config.platforms)?;
+        &config.install_path, &config.platforms, config.qq_config.as_ref())?;
 
     // Step 7: 注册系统服务（失败不阻断部署，仅记录警告）
     if config.install_service {
@@ -642,6 +645,7 @@ mod tests {
             start_on_boot: true,
             source_mode: SourceModeDto::Bundled,
             platforms: vec![],
+            qq_config: None,
             ai_config: None,
         };
         let config = DeployConfig::from(dto);
@@ -676,6 +680,7 @@ mod tests {
                 path: "/tmp/openclaw.zip".into()
             },
             platforms: vec![],
+            qq_config: None,
             ai_config: None,
         };
         let config = DeployConfig::from(dto);

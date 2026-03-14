@@ -2,50 +2,35 @@
   <WizardLayout @next="handleNext" next-label="下一步（可跳过）">
     <div class="platform-page">
       <h2>平台集成（可选）</h2>
-      <p class="desc">勾选平台后，浏览器将自动打开对应的机器人配置页面，按应用内步骤获取 Webhook 地址后粘贴即可。</p>
+      <p class="desc">勾选平台后，浏览器将自动打开配置页，按应用内步骤操作后填入凭据。可跳过，安装后在控制台配置。</p>
 
       <div class="platform-list">
+        <!-- 企业微信 / 钉钉 / 飞书：Webhook URL 方式 -->
         <div
-          v-for="p in platforms"
+          v-for="p in webhookPlatforms"
           :key="p.id"
           class="platform-card"
           :class="{ active: config.platforms[p.id].enabled }"
         >
-          <!-- 标题行：勾选框 + 图标 + 名称 + 打开浏览器按钮 -->
           <div class="card-header">
             <label class="card-toggle">
-              <input
-                type="checkbox"
-                v-model="config.platforms[p.id].enabled"
-                @change="onToggle(p)"
-              />
+              <input type="checkbox" v-model="config.platforms[p.id].enabled" @change="onToggle(p)" />
               <span class="p-icon">{{ p.icon }}</span>
               <span class="p-name">{{ p.name }}</span>
             </label>
-
-            <button
-              v-if="config.platforms[p.id].enabled"
-              class="open-btn"
-              @click="openPlatform(p)"
-              title="在浏览器中打开配置页"
-            >
+            <button v-if="config.platforms[p.id].enabled" class="open-btn" @click="openPlatform(p)">
               🌐 打开{{ p.shortName }}配置页
             </button>
             <span v-else class="toggle-hint">点击启用</span>
           </div>
 
-          <!-- 展开区：步骤 + 输入框 -->
           <div v-if="config.platforms[p.id].enabled" class="expanded-area">
-
-            <!-- 分步操作指引 -->
             <div class="steps-guide">
-              <div class="steps-label">操作步骤（浏览器中）</div>
+              <div class="steps-label">操作步骤（在客户端中）</div>
               <ol class="step-list">
                 <li v-for="(step, i) in p.steps" :key="i">{{ step }}</li>
               </ol>
             </div>
-
-            <!-- Webhook 输入 -->
             <div class="input-section">
               <div class="input-label">粘贴 Webhook 地址</div>
               <div class="input-row">
@@ -66,13 +51,69 @@
             </div>
           </div>
         </div>
+
+        <!-- QQ 机器人：AppID + AppSecret 方式（不同于其他平台） -->
+        <div class="platform-card qq-card" :class="{ active: config.qqEnabled }">
+          <div class="card-header">
+            <label class="card-toggle">
+              <input type="checkbox" v-model="config.qqEnabled" @change="onToggleQq" />
+              <span class="p-icon">🐧</span>
+              <span class="p-name">QQ 机器人</span>
+              <span class="p-badge">回调模式</span>
+            </label>
+            <button v-if="config.qqEnabled" class="open-btn" @click="openQqPlatform">
+              🌐 打开 QQ 开放平台
+            </button>
+            <span v-else class="toggle-hint">点击启用</span>
+          </div>
+
+          <div v-if="config.qqEnabled" class="expanded-area">
+            <!-- QQ 与其他平台的差异说明 -->
+            <div class="qq-notice">
+              <strong>⚠️ QQ 机器人与其他平台不同：</strong>
+              您需要在 QQ 开放平台注册应用，将 OpenClaw 的回调地址填入平台，由平台主动推送消息到您的服务。
+            </div>
+
+            <div class="steps-guide">
+              <div class="steps-label">操作步骤（在浏览器中）</div>
+              <ol class="step-list">
+                <li>访问 <strong>bot.q.qq.com</strong>，登录并创建机器人应用</li>
+                <li>在应用详情页获取 <strong>AppID</strong> 和 <strong>AppSecret</strong>，填入下方</li>
+                <li>在「回调配置」中，将 OpenClaw 的回调地址填入：<br>
+                  <code class="callback-url">{{ callbackUrl }}</code>
+                  <button class="copy-btn" @click="copyCallback">复制</button>
+                </li>
+                <li>完成 ED25519 签名验证（OpenClaw 自动处理），等待审核通过</li>
+              </ol>
+            </div>
+
+            <div class="input-section">
+              <div class="field-row">
+                <div class="field">
+                  <div class="input-label">AppID</div>
+                  <input type="text" v-model="config.qqAppId" placeholder="如：12345678" class="cred-input" />
+                </div>
+                <div class="field">
+                  <div class="input-label">AppSecret</div>
+                  <input
+                    :type="showQqSecret ? 'text' : 'password'"
+                    v-model="config.qqAppSecret"
+                    placeholder="在开放平台复制"
+                    class="cred-input"
+                  />
+                  <button class="eye-inline" @click="showQqSecret = !showQqSecret">{{ showQqSecret ? "🙈" : "👁️" }}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </WizardLayout>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import WizardLayout from "@/components/WizardLayout.vue";
 import { useConfigStore } from "@/stores/config";
 import { useWizardStore } from "@/stores/wizard";
@@ -82,19 +123,28 @@ import { tauri } from "@/composables/useTauri";
 const config = useConfigStore();
 const wizard = useWizardStore();
 const { next } = useWizardNav();
+const showQqSecret = ref(false);
 
-interface Platform {
+// QQ 回调地址：基于配置的端口/域名生成
+const callbackUrl = computed(() => {
+  const base = config.domainName
+    ? `https://${config.domainName}`
+    : `http://YOUR_SERVER_IP:${config.servicePort}`;
+  return `${base}/webhook/qq`;
+});
+
+interface WebhookPlatform {
   id: string;
   icon: string;
   name: string;
   shortName: string;
   placeholder: string;
   pattern: RegExp;
-  configUrl: string;   // 在浏览器中打开的配置页
-  steps: string[];     // 应用内分步操作指引
+  configUrl: string;
+  steps: string[];
 }
 
-const platforms: Platform[] = [
+const webhookPlatforms: WebhookPlatform[] = [
   {
     id: "wx",
     icon: "💼",
@@ -150,17 +200,27 @@ const platforms: Platform[] = [
 
 onMounted(() => { wizard.setReady(true); });
 
-/** 勾选时自动打开浏览器 */
-function onToggle(p: Platform) {
-  if (config.platforms[p.id].enabled) {
-    openPlatform(p);
-  }
+/** Webhook 平台：勾选时自动打开浏览器 */
+function onToggle(p: WebhookPlatform) {
+  if (config.platforms[p.id].enabled) openPlatform(p);
 }
 
-function openPlatform(p: Platform) {
-  tauri.openUrl(p.configUrl).catch(() => {
-    window.open(p.configUrl, "_blank");
-  });
+function openPlatform(p: WebhookPlatform) {
+  tauri.openUrl(p.configUrl).catch(() => { window.open(p.configUrl, "_blank"); });
+}
+
+/** QQ：勾选时打开 QQ 开放平台 */
+function onToggleQq() {
+  if (config.qqEnabled) openQqPlatform();
+}
+
+function openQqPlatform() {
+  const url = "https://bot.q.qq.com/";
+  tauri.openUrl(url).catch(() => { window.open(url, "_blank"); });
+}
+
+function copyCallback() {
+  navigator.clipboard.writeText(callbackUrl.value).catch(() => {});
 }
 
 function isValid(id: string) {
@@ -258,4 +318,34 @@ h2 { font-size: 20px; font-weight: 700; }
 .mark.warn { color: var(--color-warning); }
 
 .err-tip { font-size: 12px; color: var(--color-warning); margin: 0; }
+
+/* QQ 专有样式 */
+.qq-card .p-badge {
+  margin-left: 6px; background: #f0e6ff; color: #7c3aed;
+  font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600;
+}
+.qq-notice {
+  background: #fffbeb; border: 1px solid #fde68a;
+  border-radius: var(--radius); padding: 10px 14px;
+  font-size: 12px; line-height: 1.7; color: #92400e;
+}
+.callback-url {
+  display: inline-block; background: #1e293b; color: #94a3b8;
+  border-radius: 4px; padding: 2px 8px; font-family: monospace; font-size: 12px;
+  word-break: break-all;
+}
+.copy-btn {
+  margin-left: 8px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+  border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface);
+}
+.field-row { display: flex; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; flex: 1; position: relative; }
+.cred-input {
+  padding: 8px 12px; border: 1px solid var(--color-border);
+  border-radius: var(--radius); font-size: 13px; width: 100%; box-sizing: border-box;
+}
+.eye-inline {
+  position: absolute; right: 8px; top: 26px;
+  background: none; border: none; cursor: pointer; font-size: 14px;
+}
 </style>

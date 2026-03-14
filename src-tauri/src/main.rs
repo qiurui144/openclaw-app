@@ -113,8 +113,9 @@ fn clear_session(install_path: Option<String>) -> Result<(), String> {
 fn write_platform_config(
     install_path: String,
     platforms: Vec<platform_config::PlatformEntry>,
+    qq_config: Option<platform_config::QqConfig>,
 ) -> Result<(), String> {
-    platform_config::write_platform_config(&install_path, &platforms)
+    platform_config::write_platform_config(&install_path, &platforms, qq_config.as_ref())
         .map_err(|e| e.to_string())
 }
 

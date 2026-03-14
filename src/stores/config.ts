@@ -19,6 +19,12 @@ export interface PlatformEntry {
   webhook_url: string;
 }
 
+/** QQ 开放平台机器人凭据（与其他平台不同，使用 AppID + AppSecret） */
+export interface QqConfigDto {
+  app_id: string;
+  app_secret: string;
+}
+
 export interface DeployConfigDto {
   install_path: string;
   service_port: number;
@@ -28,6 +34,7 @@ export interface DeployConfigDto {
   start_on_boot: boolean;
   source_mode: { type: string; proxy_url?: string; path?: string };
   platforms: PlatformEntry[];
+  qq_config: QqConfigDto | null;
   ai_config: AiConfigDto | null;
 }
 
@@ -52,6 +59,11 @@ export const useConfigStore = defineStore("config", () => {
     dt: { enabled: false, webhookUrl: "" },
     fs: { enabled: false, webhookUrl: "" },
   });
+
+  // QQ 机器人（AppID + AppSecret，与 Webhook 平台不同）
+  const qqEnabled  = ref(false);
+  const qqAppId    = ref("");
+  const qqAppSecret = ref("");
 
   // AI 模型配置
   const aiProvider = ref("");
@@ -90,6 +102,9 @@ export const useConfigStore = defineStore("config", () => {
       start_on_boot: startOnBoot.value,
       source_mode: { type: "bundled" },
       platforms: platformEntries,
+      qq_config: qqEnabled.value && qqAppId.value && qqAppSecret.value
+        ? { app_id: qqAppId.value, app_secret: qqAppSecret.value }
+        : null,
       ai_config: aiApiKey.value
         ? { provider: aiProvider.value, base_url: aiBaseUrl.value,
             api_key: aiApiKey.value, model: aiModel.value }
@@ -102,6 +117,7 @@ export const useConfigStore = defineStore("config", () => {
     domainName, installService, startOnBoot, clashSubscriptionUrl,
     localZipPath, platforms,
     aiProvider, aiBaseUrl, aiApiKey, aiModel,
+    qqEnabled, qqAppId, qqAppSecret,
     isPasswordValid, passwordsMatch,
     updatePlatform, toDto,
   };
