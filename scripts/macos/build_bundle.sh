@@ -38,7 +38,7 @@ case "$MIHOMO_ARCH" in
   arm64)  MIHOMO_DL_ARCH="arm64" ;;
   *)      MIHOMO_DL_ARCH="$MIHOMO_ARCH" ;;
 esac
-MIHOMO_URL="https://github.com/MetaCubX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-darwin-${MIHOMO_DL_ARCH}-v${MIHOMO_VERSION}.gz"
+MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-darwin-${MIHOMO_DL_ARCH}-v${MIHOMO_VERSION}.gz"
 MIHOMO_BIN="/tmp/oc_mihomo_bin"
 echo "下载 Mihomo ${MIHOMO_VERSION} (${MIHOMO_ARCH} -> ${MIHOMO_DL_ARCH})…"
 curl -fL "$MIHOMO_URL" -o "${MIHOMO_BIN}.gz"

@@ -100,8 +100,8 @@ jobs:
           curl -fL "$OC_URL" -o resources/binaries/windows/openclaw.tgz
           MIHOMO_VERSION="1.18.7"
           echo "下载 Windows Mihomo ${MIHOMO_VERSION}..."
-          curl -fsSL "https://github.com/MetaCubX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-windows-amd64-v${MIHOMO_VERSION}.zip" -o mihomo_win.zip
-          unzip -p mihomo_win.zip > resources/binaries/windows/mihomo.exe
+          curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-windows-amd64-v${MIHOMO_VERSION}.zip" -o mihomo_win.zip
+          unzip -p mihomo_win.zip "mihomo-windows-amd64.exe" > resources/binaries/windows/mihomo.exe
           rm mihomo_win.zip
 
       - name: 构建 Full Bundle NSIS

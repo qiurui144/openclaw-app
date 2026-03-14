@@ -19,7 +19,7 @@ clash_mihomo_url() {
     x86_64) arch_tag="amd64" ;;
     *) echo "不支持的架构：$arch" >&2; return 1 ;;
   esac
-  echo "https://github.com/MetaCubX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-${os_tag}-${arch_tag}-v${MIHOMO_VERSION}.gz"
+  echo "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-${os_tag}-${arch_tag}-v${MIHOMO_VERSION}.gz"
 }
 
 # 保存订阅 URL

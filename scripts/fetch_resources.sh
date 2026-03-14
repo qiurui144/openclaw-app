@@ -57,7 +57,7 @@ fi
 
 # ── Mihomo（Clash 代理）────────────────────────────────────
 MIHOMO_VERSION="${MIHOMO_VERSION:-1.18.7}"
-MIHOMO_BASE_URL="https://github.com/MetaCubX/mihomo/releases/download/v${MIHOMO_VERSION}"
+MIHOMO_BASE_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}"
 
 if [[ ! -f "$RESOURCES_DIR/linux/mihomo" ]]; then
   echo "下载 Linux Mihomo ${MIHOMO_VERSION}..."
