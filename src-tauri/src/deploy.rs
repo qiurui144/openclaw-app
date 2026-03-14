@@ -130,10 +130,10 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
 
     // Step 2-4: 获取并解包资源（因 SourceMode 不同行为差异）
     emit_progress(window, 2, TOTAL, "获取 Node.js 运行时…");
-    acquire_node(config).await?;
+    acquire_node(config, window).await?;
 
     emit_progress(window, 3, TOTAL, "获取 OpenClaw 安装包…");
-    acquire_openclaw_package(config).await?;
+    acquire_openclaw_package(config, window).await?;
 
     emit_progress(window, 4, TOTAL, "解包 OpenClaw（含所有依赖，请稍候）…");
     extract_openclaw(config, window)?;
@@ -206,7 +206,7 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
 
 // ── 各步骤实现 ────────────────────────────────────────────────────
 
-async fn acquire_node(config: &DeployConfig) -> Result<()> {
+async fn acquire_node(config: &DeployConfig, window: &Window) -> Result<()> {
     let node_dir = PathBuf::from(&config.install_path).join("node");
     std::fs::create_dir_all(&node_dir)?;
     let dest = node_dir.join(if cfg!(windows) { "node.exe" } else { "node" });
@@ -231,7 +231,7 @@ async fn acquire_node(config: &DeployConfig) -> Result<()> {
             anyhow::bail!("Bundled 模式需要使用 --features bundled 编译（资源文件未内嵌）");
         }
         SourceMode::Online { proxy_url } => {
-            download_node_binary(&dest, proxy_url.as_deref()).await?;
+            download_node_binary(&dest, proxy_url.as_deref(), window).await?;
         }
         SourceMode::LocalZip(zip_path) => {
             extract_from_zip(zip_path, "node", &dest)?;
@@ -240,7 +240,7 @@ async fn acquire_node(config: &DeployConfig) -> Result<()> {
     Ok(())
 }
 
-async fn acquire_openclaw_package(config: &DeployConfig) -> Result<()> {
+async fn acquire_openclaw_package(config: &DeployConfig, window: &Window) -> Result<()> {
     let dest = PathBuf::from(&config.install_path).join("openclaw.tgz");
     match &config.source_mode {
         SourceMode::Bundled => {
@@ -256,7 +256,7 @@ async fn acquire_openclaw_package(config: &DeployConfig) -> Result<()> {
             anyhow::bail!("Bundled 模式需要使用 --features bundled 编译");
         }
         SourceMode::Online { proxy_url } => {
-            download_openclaw_package(&dest, proxy_url.as_deref()).await?;
+            download_openclaw_package(&dest, proxy_url.as_deref(), window).await?;
         }
         SourceMode::LocalZip(zip_path) => {
             extract_from_zip(zip_path, "openclaw.tgz", &dest)?;
@@ -380,6 +380,37 @@ fn install_service(config: &DeployConfig) -> Result<()> {
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        let plist = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
+             \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+             <plist version=\"1.0\"><dict>\n\
+             <key>Label</key><string>com.openclaw.gateway</string>\n\
+             <key>ProgramArguments</key><array>\n\
+             <string>{node}</string><string>{script}</string>\
+             <string>gateway</string><string>--port</string><string>{port}</string>\n\
+             </array>\n\
+             <key>EnvironmentVariables</key><dict>\
+             <key>NODE_ENV</key><string>production</string></dict>\n\
+             <key>RunAtLoad</key><{boot}/>\n\
+             <key>KeepAlive</key><true/>\n\
+             <key>StandardOutPath</key><string>/tmp/openclaw.log</string>\n\
+             <key>StandardErrorPath</key><string>/tmp/openclaw.log</string>\n\
+             </dict></plist>\n",
+            node = node_bin.display(), script = script.display(), port = port,
+            boot = if config.start_on_boot { "true" } else { "false" },
+        );
+        let plist_dir = if elevated {
+            PathBuf::from("/Library/LaunchDaemons")
+        } else {
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+                .join("Library/LaunchAgents")
+        };
+        std::fs::create_dir_all(&plist_dir)?;
+        std::fs::write(plist_dir.join("com.openclaw.gateway.plist"), plist)?;
+    }
     #[cfg(target_os = "windows")]
     {
         let cmd = format!("\"{}\" \"{}\" gateway --port {}",
@@ -448,6 +479,31 @@ fn start_service(config: &DeployConfig) -> Result<()> {
             .spawn()
             .map_err(|e| anyhow::anyhow!("启动 OpenClaw 失败: {e}"))?;
     }
+    #[cfg(target_os = "macos")]
+    {
+        let elevated = crate::system_check::is_elevated();
+        let plist_path = if elevated {
+            PathBuf::from("/Library/LaunchDaemons/com.openclaw.gateway.plist")
+        } else {
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+                .join("Library/LaunchAgents/com.openclaw.gateway.plist")
+        };
+
+        if config.install_service && plist_path.exists() {
+            let ok = std::process::Command::new("launchctl")
+                .args(["load", "-w", plist_path.to_str().unwrap_or("")])
+                .status().map(|s| s.success()).unwrap_or(false);
+            if ok { return Ok(()); }
+        }
+
+        // 直接启动进程（未选 launchd 或 launchctl 失败时）
+        std::process::Command::new(&node_bin)
+            .args([script.to_str().unwrap(), "gateway",
+                   "--port", &config.service_port.to_string()])
+            .env("NODE_ENV", "production")
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("启动 OpenClaw 失败: {e}\n节点: {}", node_bin.display()))?;
+    }
     Ok(())
 }
 
@@ -490,7 +546,7 @@ pub async fn health_check(port: u16) -> Result<()> {
 }
 
 fn write_uninstall_script(config: &DeployConfig) -> Result<()> {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         let elevated = crate::system_check::is_elevated();
         let service_cmds = if elevated {
@@ -513,7 +569,30 @@ fn write_uninstall_script(config: &DeployConfig) -> Result<()> {
             service_cmds, config.install_path
         );
         let path = PathBuf::from(&config.install_path).join("uninstall.sh");
-        std::fs::write(&path, script)?;
+        std::fs::write(&path, &script)?;
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let elevated = crate::system_check::is_elevated();
+        let plist = if elevated {
+            "/Library/LaunchDaemons/com.openclaw.gateway.plist".to_string()
+        } else {
+            format!("{}/Library/LaunchAgents/com.openclaw.gateway.plist",
+                dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default())
+        };
+        let script = format!(
+            "#!/bin/bash\nset -e\n\
+             launchctl unload -w \"{plist}\" 2>/dev/null || true\n\
+             rm -f \"{plist}\"\n\
+             rm -rf \"{dir}\"\n\
+             rm -rf ~/.openclaw\n\
+             echo '✓ OpenClaw 已卸载'\n",
+            plist = plist, dir = config.install_path
+        );
+        let path = PathBuf::from(&config.install_path).join("uninstall.sh");
+        std::fs::write(&path, &script)?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
     }
@@ -555,33 +634,29 @@ fn write_deploy_meta(config: &DeployConfig) -> Result<()> {
 
 // ── 网络下载辅助（Online 模式）────────────────────────────────────
 
-async fn download_node_binary(dest: &PathBuf, proxy: Option<&str>) -> Result<()> {
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    { let _ = (dest, proxy); anyhow::bail!("当前平台不支持在线下载 Node.js"); }
+async fn download_node_binary(dest: &PathBuf, proxy: Option<&str>, window: &Window) -> Result<()> {
+    let version = "22.17.0";
+    #[cfg(target_os = "linux")]
+    let url = format!("https://nodejs.org/dist/v{}/node-v{}-linux-x64.tar.xz", version, version);
+    #[cfg(target_os = "windows")]
+    let url = format!("https://nodejs.org/dist/v{}/node-v{}-win-x64.zip", version, version);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let url = format!("https://nodejs.org/dist/v{}/node-v{}-darwin-arm64.tar.gz", version, version);
+    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+    let url = format!("https://nodejs.org/dist/v{}/node-v{}-darwin-x64.tar.gz", version, version);
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    let url = { let _ = (dest, proxy, window); anyhow::bail!("当前平台不支持在线下载 Node.js") };
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    let archive_tmp = dest.with_file_name("node_archive.tmp");
+    download_with_progress(&url, &archive_tmp, proxy, "Node.js", window).await?;
+    extract_node_from_archive(&archive_tmp, dest)?;
+    std::fs::remove_file(&archive_tmp).ok();
+    #[cfg(unix)]
     {
-        let version = "22.17.0";
-        #[cfg(target_os = "linux")]
-        let url = format!(
-            "https://nodejs.org/dist/v{}/node-v{}-linux-x64.tar.xz", version, version);
-        #[cfg(target_os = "windows")]
-        let url = format!(
-            "https://nodejs.org/dist/v{}/node-v{}-win-x64.zip", version, version);
-
-        let client = build_client(proxy)?;
-        let bytes = client.get(&url).send().await?.bytes().await?;
-        let archive_tmp = dest.with_file_name("node_archive.tmp");
-        std::fs::write(&archive_tmp, &bytes)?;
-        extract_node_from_archive(&archive_tmp, dest)?;
-        std::fs::remove_file(&archive_tmp).ok();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
-        }
-        Ok(())
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
     }
+    Ok(())
 }
 
 fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
@@ -615,15 +690,62 @@ fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
         }
         anyhow::bail!("Node.js 压缩包中未找到 node.exe");
     }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(target_os = "macos")]
+    {
+        // macOS 发行版为 .tar.gz
+        let file = std::fs::File::open(archive)?;
+        let gz = flate2::read::GzDecoder::new(file);
+        let mut tar = tar::Archive::new(gz);
+        for entry in tar.entries()? {
+            let mut e = entry?;
+            let path = e.path()?.into_owned();
+            if path.ends_with("bin/node") {
+                e.unpack(dest)?;
+                return Ok(());
+            }
+        }
+        anyhow::bail!("Node.js 压缩包中未找到 bin/node");
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     anyhow::bail!("当前平台不支持自动提取 Node.js 二进制");
 }
 
-async fn download_openclaw_package(dest: &PathBuf, proxy: Option<&str>) -> Result<()> {
+async fn download_openclaw_package(dest: &PathBuf, proxy: Option<&str>, window: &Window) -> Result<()> {
     let url = "https://github.com/openclaw/openclaw/releases/latest/download/openclaw.tgz";
+    download_with_progress(url, dest, proxy, "OpenClaw", window).await
+}
+
+/// 流式下载并实时向前端发送下载进度（每 512KB 一条日志）
+async fn download_with_progress(
+    url: &str, dest: &PathBuf, proxy: Option<&str>, label: &str, window: &Window,
+) -> Result<()> {
+    use std::io::Write;
     let client = build_client(proxy)?;
-    let bytes = client.get(url).send().await?.bytes().await?;
-    std::fs::write(dest, &bytes)?;
+    let resp = client.get(url).send().await?;
+    let total = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut last_logged: u64 = 0;
+    let log_interval: u64 = 512 * 1024; // 每 512KB 记一条
+
+    let mut file = std::fs::File::create(dest)?;
+    let mut stream = resp;
+    while let Some(chunk) = stream.chunk().await? {
+        file.write_all(&chunk)?;
+        downloaded += chunk.len() as u64;
+        if downloaded - last_logged >= log_interval || downloaded == total {
+            last_logged = downloaded;
+            let msg = if total > 0 {
+                format!("下载 {} {:.1}/{:.1} MB ({:.0}%)",
+                    label,
+                    downloaded as f64 / 1_048_576.0,
+                    total as f64 / 1_048_576.0,
+                    downloaded as f64 * 100.0 / total as f64)
+            } else {
+                format!("下载 {} {:.1} MB", label, downloaded as f64 / 1_048_576.0)
+            };
+            let _ = window.emit("deploy:log", msg);
+        }
+    }
     Ok(())
 }
 
