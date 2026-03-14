@@ -1,6 +1,6 @@
 [package]
 name = "openclaw"
-version = "1.1.3"
+version = "1.1.4"
 edition = "2021"
 
 [lib]
@@ -38,7 +38,7 @@ sysinfo = "0.30"
 zip = "2"
 libc = "0.2"
 
-tauri = { version = "2" }
+tauri = { version = "2", features = ["tray-icon"] }
 
 [features]
 bundled = []

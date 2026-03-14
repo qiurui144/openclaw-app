@@ -50,6 +50,11 @@ export const tauri = {
   getDefaultInstallPath: () => invoke<string>("get_default_install_path"),
   healthCheck: (port: number) => invoke<void>("health_check", { port }),
   runUninstall: (installPath: string) => invoke<void>("run_uninstall", { installPath }),
+  // 服务控制（托盘 + FinishPage 共用）
+  serviceStatus: () => invoke<"running" | "stopped" | "unknown">("service_status"),
+  serviceStart: () => invoke<void>("service_start"),
+  serviceStop: () => invoke<void>("service_stop"),
+  notifyDeployDone: () => invoke<void>("notify_deploy_done"),
 };
 
 export function useDeployEvents(

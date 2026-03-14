@@ -29,6 +29,16 @@
 
       <div class="action-row">
         <button class="btn-primary" @click="openConsole">🌐 打开管理控制台</button>
+        <button class="btn-tray" @click="minimizeToTray" title="最小化到系统托盘，OpenClaw 将在后台持续运行">
+          🔔 最小化到托盘
+        </button>
+      </div>
+
+      <!-- 服务实时状态 -->
+      <div class="service-status" :class="serviceState">
+        <span class="status-dot"></span>
+        <span>{{ serviceStateText }}</span>
+        <button v-if="serviceState === 'stopped'" class="btn-restart" @click="restartService">▶ 启动服务</button>
       </div>
 
       <div class="next-steps">
@@ -61,7 +71,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import WizardLayout from "@/components/WizardLayout.vue";
 import { useWizardStore } from "@/stores/wizard";
 import { useConfigStore } from "@/stores/config";
@@ -72,15 +83,51 @@ const config = useConfigStore();
 const updatableSkills = ref<SkillInfo[]>([]);
 const updating = ref(false);
 
+// 服务状态
+const serviceState = ref<"running" | "stopped" | "unknown">("unknown");
+const serviceStateText = computed(() => ({
+  running: "服务运行中 🟢",
+  stopped: "服务已停止 🔴",
+  unknown: "状态检测中…",
+}[serviceState.value]));
+
+let statusTimer: ReturnType<typeof setInterval> | null = null;
+
 onMounted(async () => {
+  // 通知托盘刷新（部署刚完成）
+  tauri.notifyDeployDone().catch(() => {});
+
+  // 加载技能列表
   try {
     const skills = await tauri.listSkills(config.installPath);
     updatableSkills.value = skills.filter((s) => s.update_available);
   } catch { /* 忽略 */ }
+
+  // 轮询服务状态（每 10s 一次）
+  const poll = async () => {
+    serviceState.value = await tauri.serviceStatus().catch(() => "unknown" as const);
+  };
+  await poll();
+  statusTimer = setInterval(poll, 10_000);
+});
+
+onUnmounted(() => {
+  if (statusTimer) clearInterval(statusTimer);
 });
 
 function openConsole() {
   tauri.openUrl(`http://127.0.0.1:${config.servicePort}`);
+}
+
+async function minimizeToTray() {
+  await getCurrentWindow().hide();
+}
+
+async function restartService() {
+  await tauri.serviceStart().catch(() => {});
+  setTimeout(async () => {
+    serviceState.value = await tauri.serviceStatus().catch(() => "unknown" as const);
+  }, 3000);
 }
 
 async function updateAll() {
@@ -122,7 +169,7 @@ h2 { font-size: 24px; font-weight: 700; margin-top: 8px; }
 .s-label { color: var(--color-muted); min-width: 80px; }
 .s-val { font-family: monospace; flex: 1; }
 .copy-btn { padding: 2px 8px; font-size: 11px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 4px; }
-.action-row { display: flex; justify-content: center; }
+.action-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
 .btn-primary { padding: 10px 24px; font-size: 15px; }
 .skills-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
 .skill-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
@@ -135,6 +182,33 @@ h2 { font-size: 24px; font-weight: 700; margin-top: 8px; }
 }
 .ns-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .ns-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #475569; }
+.btn-tray {
+  padding: 10px 20px; font-size: 14px;
+  border: 1px solid var(--color-border); border-radius: var(--radius);
+  background: var(--color-surface); cursor: pointer;
+  transition: background .15s;
+}
+.btn-tray:hover { background: var(--color-bg); }
+
+.service-status {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: var(--radius);
+  font-size: 13px; border: 1px solid var(--color-border);
+}
+.service-status.running { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.service-status.stopped { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+.service-status.unknown { background: var(--color-surface); color: var(--color-muted); }
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: currentColor;
+}
+.btn-restart {
+  margin-left: auto; padding: 4px 12px; font-size: 12px;
+  border: 1px solid currentColor; border-radius: var(--radius);
+  background: transparent; cursor: pointer; color: inherit;
+}
+.btn-restart:hover { background: rgba(0,0,0,.06); }
+
 .feedback { text-align: center; font-size: 13px; }
 .feedback a { color: var(--color-muted); }
 </style>
