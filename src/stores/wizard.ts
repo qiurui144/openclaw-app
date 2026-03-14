@@ -45,6 +45,9 @@ export const useWizardStore = defineStore("wizard", () => {
     deployProgress.value = p;
     deployLogs.value.push(`[${new Date().toLocaleTimeString()}] ${p.message}`);
   }
+  function appendLog(line: string) {
+    deployLogs.value.push(line);
+  }
   function setExistingInstall(version: string, path: string) {
     isExistingInstall.value = true;
     existingVersion.value = version;
@@ -56,6 +59,6 @@ export const useWizardStore = defineStore("wizard", () => {
     clashAccepted, deployStatus, deployProgress, deployLogs,
     isExistingInstall, existingVersion, existingPath,
     setReady, setWizardMode, setChecks, setSourceMode, setClashAccepted,
-    setDeployStatus, updateProgress, setExistingInstall,
+    setDeployStatus, updateProgress, appendLog, setExistingInstall,
   };
 });

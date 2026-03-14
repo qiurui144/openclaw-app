@@ -18,13 +18,12 @@ async fn run_system_check() -> Vec<system_check::CheckItem> {
 }
 
 #[tauri::command]
-async fn start_deploy(
+fn start_deploy(
     config: deploy::DeployConfigDto,
     window: tauri::Window,
-) -> Result<(), String> {
+) {
     let cfg = deploy::DeployConfig::from(config);
-    deploy::start_deploy(cfg, window).await
-        .map_err(|e| e.to_string())
+    deploy::start_deploy(cfg, window);
 }
 
 #[tauri::command]

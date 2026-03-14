@@ -34,7 +34,7 @@ export const tauri = {
   runSystemCheck: () => invoke<CheckItem[]>("run_system_check"),
   loadSession: () => invoke<{ install_path: string; source_mode: string } | null>("load_session"),
   clearSession: (installPath?: string) => invoke<void>("clear_session", { installPath }),
-  startDeploy: (config: unknown) => invoke<void>("start_deploy", { config }),
+  startDeploy: (config: unknown) => invoke<void>("start_deploy", { config }),  // 立即返回，结果通过 deploy:* 事件通知
   clashTest: (url: string) => invoke<ClashTestResult>("clash_test", { subscriptionUrl: url }),
   clashStart: (url: string) => invoke<string>("clash_start", { subscriptionUrl: url }),
   clashStop: () => invoke<void>("clash_stop"),
@@ -61,10 +61,12 @@ export function useDeployEvents(
   onProgress: (p: DeployProgress) => void,
   onDone: () => void,
   onFailed?: (reason: string) => void,
+  onLog?: (line: string) => void,
 ) {
   let unlistenProgress: UnlistenFn | null = null;
   let unlistenDone: UnlistenFn | null = null;
   let unlistenFailed: UnlistenFn | null = null;
+  let unlistenLog: UnlistenFn | null = null;
 
   async function subscribe() {
     unlistenProgress = await listen<DeployProgress>("deploy:progress", (e) => onProgress(e.payload));
@@ -72,12 +74,16 @@ export function useDeployEvents(
     if (onFailed) {
       unlistenFailed = await listen<string>("deploy:failed", (e) => onFailed(e.payload));
     }
+    if (onLog) {
+      unlistenLog = await listen<string>("deploy:log", (e) => onLog(e.payload));
+    }
   }
 
   function unsubscribe() {
     unlistenProgress?.();
     unlistenDone?.();
     unlistenFailed?.();
+    unlistenLog?.();
   }
 
   onUnmounted(unsubscribe);

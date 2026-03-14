@@ -108,15 +108,17 @@ fn emit_progress(window: &Window, step: u32, total: u32, msg: &str) {
     });
 }
 
-pub async fn start_deploy(config: DeployConfig, window: Window) -> Result<()> {
-    match do_deploy(&config, &window).await {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let msg = e.to_string();
-            let _ = window.emit("deploy:failed", &msg);
-            Err(e)
+pub fn start_deploy(config: DeployConfig, window: Window) {
+    // 立即返回，部署在后台 Tokio 任务中运行
+    // 进度、完成、失败均通过 deploy:progress / deploy:done / deploy:failed 事件通知前端
+    tauri::async_runtime::spawn(async move {
+        match do_deploy(&config, &window).await {
+            Ok(()) => {}
+            Err(e) => {
+                let _ = window.emit("deploy:failed", &e.to_string());
+            }
         }
-    }
+    });
 }
 
 async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
@@ -134,7 +136,7 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     acquire_openclaw_package(config).await?;
 
     emit_progress(window, 4, TOTAL, "解包 OpenClaw（含所有依赖，请稍候）…");
-    extract_openclaw(config)?;
+    extract_openclaw(config, window)?;
 
     // Step 5: 写入主配置
     emit_progress(window, 5, TOTAL, "写入配置文件…");
@@ -263,7 +265,7 @@ async fn acquire_openclaw_package(config: &DeployConfig) -> Result<()> {
     Ok(())
 }
 
-fn extract_openclaw(config: &DeployConfig) -> Result<()> {
+fn extract_openclaw(config: &DeployConfig, window: &Window) -> Result<()> {
     let tgz = PathBuf::from(&config.install_path).join("openclaw.tgz");
     let dest = PathBuf::from(&config.install_path).join("openclaw_pkg");
     std::fs::create_dir_all(&dest)?;
@@ -271,7 +273,17 @@ fn extract_openclaw(config: &DeployConfig) -> Result<()> {
     let file = std::fs::File::open(&tgz)?;
     let gz = flate2::read::GzDecoder::new(file);
     let mut archive = tar::Archive::new(gz);
-    archive.unpack(&dest)?;
+
+    // 逐条解包并向前端发送文件名日志
+    for (i, entry) in archive.entries()?.enumerate() {
+        let mut entry = entry?;
+        let path = entry.path()?.to_string_lossy().to_string();
+        entry.unpack_in(&dest)?;
+        // 每 50 个文件更新一次日志，避免消息过多
+        if i % 50 == 0 {
+            let _ = window.emit("deploy:log", format!("解包 {}", path));
+        }
+    }
     std::fs::remove_file(&tgz)?;
     Ok(())
 }

@@ -61,6 +61,9 @@ const { subscribe } = useDeployEvents(
     errorReason.value = reason;
     tauri.clashStop().catch(() => {});
   },
+  (line) => {
+    wizard.appendLog(line);
+  },
 );
 
 onMounted(async () => {
