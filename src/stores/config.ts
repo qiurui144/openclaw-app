@@ -1,11 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 
-export interface PlatformConfig {
-  enabled: boolean;
-  webhookUrl: string;
-}
-
 export interface AiConfigDto {
   provider: string;
   base_url: string;
@@ -13,13 +8,26 @@ export interface AiConfigDto {
   model: string;
 }
 
-/** Rust PlatformEntry 的 JSON 形式：枚举名小写，字段 snake_case */
-export interface PlatformEntry {
-  platform: "wework" | "dingtalk" | "feishu";
-  webhook_url: string;
+/** 企业微信自建应用凭据 */
+export interface WecomConfigDto {
+  corp_id: string;
+  corp_secret: string;
+  agent_id: string;
 }
 
-/** QQ 开放平台机器人凭据（与其他平台不同，使用 AppID + AppSecret） */
+/** 钉钉应用凭据（AppKey + AppSecret，Stream 长连接） */
+export interface DingtalkConfigDto {
+  client_id: string;
+  client_secret: string;
+}
+
+/** 飞书应用机器人凭据（App ID + App Secret，WebSocket 长连接） */
+export interface FeishuConfigDto {
+  app_id: string;
+  app_secret: string;
+}
+
+/** QQ 开放平台机器人凭据（回调推送模式） */
 export interface QqConfigDto {
   app_id: string;
   app_secret: string;
@@ -33,16 +41,12 @@ export interface DeployConfigDto {
   install_service: boolean;
   start_on_boot: boolean;
   source_mode: { type: string; proxy_url?: string; path?: string };
-  platforms: PlatformEntry[];
+  wecom_config: WecomConfigDto | null;
+  dingtalk_config: DingtalkConfigDto | null;
+  feishu_config: FeishuConfigDto | null;
   qq_config: QqConfigDto | null;
   ai_config: AiConfigDto | null;
 }
-
-const PLATFORM_ID_MAP: Record<string, "wework" | "dingtalk" | "feishu"> = {
-  wx: "wework",
-  dt: "dingtalk",
-  fs: "feishu",
-};
 
 export const useConfigStore = defineStore("config", () => {
   const installPath = ref(defaultInstallPath());
@@ -54,15 +58,26 @@ export const useConfigStore = defineStore("config", () => {
   const startOnBoot = ref(true);
   const clashSubscriptionUrl = ref("");
   const localZipPath = ref<string | null>(null);
-  const platforms = ref<Record<string, PlatformConfig>>({
-    wx: { enabled: false, webhookUrl: "" },
-    dt: { enabled: false, webhookUrl: "" },
-    fs: { enabled: false, webhookUrl: "" },
-  });
 
-  // QQ 机器人（AppID + AppSecret，与 Webhook 平台不同）
-  const qqEnabled  = ref(false);
-  const qqAppId    = ref("");
+  // 企业微信：自建应用，需要 corpId + corpSecret + agentId
+  const wecomEnabled    = ref(false);
+  const wecomCorpId     = ref("");
+  const wecomCorpSecret = ref("");
+  const wecomAgentId    = ref("");
+
+  // 钉钉：Stream 长连接，clientId (AppKey) + clientSecret (AppSecret)
+  const dingtalkEnabled      = ref(false);
+  const dingtalkClientId     = ref("");
+  const dingtalkClientSecret = ref("");
+
+  // 飞书：应用机器人，App ID + App Secret（WebSocket 长连接，无需公网 IP）
+  const feishuEnabled   = ref(false);
+  const feishuAppId     = ref("");
+  const feishuAppSecret = ref("");
+
+  // QQ 机器人（AppID + AppSecret，回调推送模式）
+  const qqEnabled   = ref(false);
+  const qqAppId     = ref("");
   const qqAppSecret = ref("");
 
   // AI 模型配置
@@ -80,19 +95,7 @@ export const useConfigStore = defineStore("config", () => {
     () => adminPassword.value === confirmPassword.value
   );
 
-  function updatePlatform(id: string, patch: Partial<PlatformConfig>) {
-    platforms.value[id] = { ...platforms.value[id], ...patch };
-  }
-
   function toDto(): DeployConfigDto {
-    // 将 Record<id, PlatformConfig> 转换为 Rust 期望的 Vec<PlatformEntry>
-    const platformEntries: PlatformEntry[] = Object.entries(platforms.value)
-      .filter(([id, p]) => p.enabled && p.webhookUrl && PLATFORM_ID_MAP[id])
-      .map(([id, p]) => ({
-        platform: PLATFORM_ID_MAP[id],
-        webhook_url: p.webhookUrl,
-      }));
-
     return {
       install_path: installPath.value,
       service_port: servicePort.value,
@@ -101,7 +104,15 @@ export const useConfigStore = defineStore("config", () => {
       install_service: installService.value,
       start_on_boot: startOnBoot.value,
       source_mode: { type: "bundled" },
-      platforms: platformEntries,
+      wecom_config: wecomEnabled.value && wecomCorpId.value && wecomCorpSecret.value && wecomAgentId.value
+        ? { corp_id: wecomCorpId.value, corp_secret: wecomCorpSecret.value, agent_id: wecomAgentId.value }
+        : null,
+      dingtalk_config: dingtalkEnabled.value && dingtalkClientId.value && dingtalkClientSecret.value
+        ? { client_id: dingtalkClientId.value, client_secret: dingtalkClientSecret.value }
+        : null,
+      feishu_config: feishuEnabled.value && feishuAppId.value && feishuAppSecret.value
+        ? { app_id: feishuAppId.value, app_secret: feishuAppSecret.value }
+        : null,
       qq_config: qqEnabled.value && qqAppId.value && qqAppSecret.value
         ? { app_id: qqAppId.value, app_secret: qqAppSecret.value }
         : null,
@@ -114,12 +125,14 @@ export const useConfigStore = defineStore("config", () => {
 
   return {
     installPath, servicePort, adminPassword, confirmPassword,
-    domainName, installService, startOnBoot, clashSubscriptionUrl,
-    localZipPath, platforms,
-    aiProvider, aiBaseUrl, aiApiKey, aiModel,
+    domainName, installService, startOnBoot, clashSubscriptionUrl, localZipPath,
+    wecomEnabled, wecomCorpId, wecomCorpSecret, wecomAgentId,
+    dingtalkEnabled, dingtalkClientId, dingtalkClientSecret,
+    feishuEnabled, feishuAppId, feishuAppSecret,
     qqEnabled, qqAppId, qqAppSecret,
+    aiProvider, aiBaseUrl, aiApiKey, aiModel,
     isPasswordValid, passwordsMatch,
-    updatePlatform, toDto,
+    toDto,
   };
 });
 

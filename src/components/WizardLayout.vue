@@ -63,17 +63,17 @@ const canGoBack = computed(() => {
   return idx > 0 && name !== "deploy";
 });
 
-const visibleSteps = computed(() => [
-  { label: "欢迎" },
-  { label: "检查" },
-  { label: "来源" },
-  { label: "配置" },
-  { label: "服务" },
-  { label: "AI" },
-  { label: "平台" },
-  { label: "部署" },
-  { label: "完成" },
-]);
+const STEPS_BY_MODE: Record<string, { label: string }[]> = {
+  install: [
+    { label: "欢迎" }, { label: "检查" }, { label: "来源" },
+    { label: "配置" }, { label: "服务" }, { label: "AI" },
+    { label: "平台" }, { label: "部署" }, { label: "完成" },
+  ],
+  update: [{ label: "欢迎" }, { label: "更新" }, { label: "完成" }],
+  uninstall: [{ label: "欢迎" }, { label: "卸载" }],
+};
+
+const visibleSteps = computed(() => STEPS_BY_MODE[wizard.wizardMode] ?? STEPS_BY_MODE.install);
 </script>
 
 <style scoped>

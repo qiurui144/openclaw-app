@@ -12,6 +12,8 @@ const routes = [
   { path: "/platform",          name: "platform",          component: () => import("@/pages/PlatformIntegrationPage.vue") },
   { path: "/deploy",            name: "deploy",            component: () => import("@/pages/DeploymentPage.vue") },
   { path: "/finish",            name: "finish",            component: () => import("@/pages/FinishPage.vue") },
+  { path: "/update",            name: "update",            component: () => import("@/pages/UpdatePage.vue") },
+  { path: "/uninstall",         name: "uninstall",         component: () => import("@/pages/UninstallPage.vue") },
 ];
 
 export const router = createRouter({

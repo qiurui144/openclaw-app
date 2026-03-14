@@ -49,6 +49,7 @@ export const tauri = {
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   getDefaultInstallPath: () => invoke<string>("get_default_install_path"),
   healthCheck: (port: number) => invoke<void>("health_check", { port }),
+  runUninstall: (installPath: string) => invoke<void>("run_uninstall", { installPath }),
 };
 
 export function useDeployEvents(

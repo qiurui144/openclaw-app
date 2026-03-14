@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Window};
 
-use crate::platform_config::{PlatformEntry, QqConfig};
+use crate::platform_config::{DingtalkConfig, FeishuConfig, PlatformConfigs, QqConfig, WecomConfig};
 #[allow(unused_imports)]
 use crate::session_state::{SessionState, DownloadedFile};
 
@@ -18,7 +18,9 @@ pub struct DeployConfigDto {
     pub install_service: bool,
     pub start_on_boot: bool,
     pub source_mode: SourceModeDto,
-    pub platforms: Vec<PlatformEntry>,
+    pub wecom_config: Option<WecomConfig>,
+    pub dingtalk_config: Option<DingtalkConfig>,
+    pub feishu_config: Option<FeishuConfig>,
     pub qq_config: Option<QqConfig>,
     pub ai_config: Option<AiConfigDto>,
 }
@@ -49,7 +51,9 @@ pub struct DeployConfig {
     pub install_service: bool,
     pub start_on_boot: bool,
     pub source_mode: SourceMode,
-    pub platforms: Vec<PlatformEntry>,
+    pub wecom_config: Option<WecomConfig>,
+    pub dingtalk_config: Option<DingtalkConfig>,
+    pub feishu_config: Option<FeishuConfig>,
     pub qq_config: Option<QqConfig>,
     pub ai_config: Option<AiConfigDto>,
 }
@@ -77,7 +81,9 @@ impl From<DeployConfigDto> for DeployConfig {
                 SourceModeDto::LocalZip { path } =>
                     SourceMode::LocalZip(PathBuf::from(path)),
             },
-            platforms: dto.platforms,
+            wecom_config: dto.wecom_config,
+            dingtalk_config: dto.dingtalk_config,
+            feishu_config: dto.feishu_config,
             qq_config: dto.qq_config,
             ai_config: dto.ai_config,
         }
@@ -137,7 +143,14 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     // Step 6: 写入平台集成配置
     emit_progress(&window, 6, TOTAL, "写入平台集成配置…");
     crate::platform_config::write_platform_config(
-        &config.install_path, &config.platforms, config.qq_config.as_ref())?;
+        &config.install_path,
+        PlatformConfigs {
+            wecom: config.wecom_config.as_ref(),
+            dingtalk: config.dingtalk_config.as_ref(),
+            feishu: config.feishu_config.as_ref(),
+            qq: config.qq_config.as_ref(),
+        },
+    )?;
 
     // Step 7: 注册系统服务（失败不阻断部署，仅记录警告）
     if config.install_service {
@@ -644,7 +657,9 @@ mod tests {
             install_service: true,
             start_on_boot: true,
             source_mode: SourceModeDto::Bundled,
-            platforms: vec![],
+            wecom_config: None,
+            dingtalk_config: None,
+            feishu_config: None,
             qq_config: None,
             ai_config: None,
         };
@@ -679,7 +694,9 @@ mod tests {
             source_mode: SourceModeDto::LocalZip {
                 path: "/tmp/openclaw.zip".into()
             },
-            platforms: vec![],
+            wecom_config: None,
+            dingtalk_config: None,
+            feishu_config: None,
             qq_config: None,
             ai_config: None,
         };

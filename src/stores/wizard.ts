@@ -4,6 +4,7 @@ import { ref } from "vue";
 export type CheckStatus = "pending" | "running" | "ok" | "warn" | "error";
 export type DeployStatus = "idle" | "running" | "done" | "failed";
 export type SourceMode = "bundled" | "online" | "local_zip";
+export type WizardMode = "install" | "update" | "uninstall";
 
 export interface CheckItem {
   id: string;
@@ -22,6 +23,7 @@ export interface DeployProgress {
 
 export const useWizardStore = defineStore("wizard", () => {
   const currentPage = ref<string>("welcome");
+  const wizardMode = ref<WizardMode>("install");
   const canProceed = ref(false);
   const systemChecks = ref<CheckItem[]>([]);
   const sourceMode = ref<SourceMode>("bundled");
@@ -34,6 +36,7 @@ export const useWizardStore = defineStore("wizard", () => {
   const existingPath = ref<string | null>(null);
 
   function setReady(v: boolean) { canProceed.value = v; }
+  function setWizardMode(m: WizardMode) { wizardMode.value = m; }
   function setChecks(items: CheckItem[]) { systemChecks.value = items; }
   function setSourceMode(m: SourceMode) { sourceMode.value = m; }
   function setClashAccepted(v: boolean) { clashAccepted.value = v; }
@@ -49,10 +52,10 @@ export const useWizardStore = defineStore("wizard", () => {
   }
 
   return {
-    currentPage, canProceed, systemChecks, sourceMode,
+    currentPage, wizardMode, canProceed, systemChecks, sourceMode,
     clashAccepted, deployStatus, deployProgress, deployLogs,
     isExistingInstall, existingVersion, existingPath,
-    setReady, setChecks, setSourceMode, setClashAccepted,
+    setReady, setWizardMode, setChecks, setSourceMode, setClashAccepted,
     setDeployStatus, updateProgress, setExistingInstall,
   };
 });

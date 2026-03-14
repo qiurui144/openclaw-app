@@ -24,7 +24,7 @@ describe("WelcomePage", () => {
     expect(wrapper.text()).toContain("OpenClaw");
   });
 
-  it("检测到已有安装时显示黄色提示", async () => {
+  it("检测到已有安装时显示三个操作选项", async () => {
     mockInvoke.mockResolvedValue({
       version: "1.0.0", install_path: "/opt/openclaw",
       installed_at: "2026-01-01", service_port: 18789,
@@ -32,7 +32,8 @@ describe("WelcomePage", () => {
     const { pinia, router } = makeApp();
     const wrapper = mount(WelcomePage, { global: { plugins: [pinia, router] } });
     await flushPromises();
-    expect(wrapper.find(".existing-banner").exists()).toBe(true);
+    expect(wrapper.find(".existing-info").exists()).toBe(true);
+    expect(wrapper.findAll(".mode-card")).toHaveLength(3);
     expect(wrapper.text()).toContain("1.0.0");
   });
 });

@@ -112,21 +112,56 @@ fn clear_session(install_path: Option<String>) -> Result<(), String> {
 #[tauri::command]
 fn write_platform_config(
     install_path: String,
-    platforms: Vec<platform_config::PlatformEntry>,
+    wecom_config: Option<platform_config::WecomConfig>,
+    dingtalk_config: Option<platform_config::DingtalkConfig>,
+    feishu_config: Option<platform_config::FeishuConfig>,
     qq_config: Option<platform_config::QqConfig>,
 ) -> Result<(), String> {
-    platform_config::write_platform_config(&install_path, &platforms, qq_config.as_ref())
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_platform_doc_url(platform: platform_config::Platform) -> String {
-    platform.doc_url().to_string()
+    platform_config::write_platform_config(
+        &install_path,
+        platform_config::PlatformConfigs {
+            wecom: wecom_config.as_ref(),
+            dingtalk: dingtalk_config.as_ref(),
+            feishu: feishu_config.as_ref(),
+            qq: qq_config.as_ref(),
+        },
+    ).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     open::that(&url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn run_uninstall(install_path: String) -> Result<(), String> {
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    #[cfg(unix)]
+    let script = PathBuf::from(&install_path).join("uninstall.sh");
+    #[cfg(windows)]
+    let script = PathBuf::from(&install_path).join("uninstall.bat");
+    #[cfg(not(any(unix, windows)))]
+    return Err("不支持的操作系统".to_string());
+
+    if !script.exists() {
+        return Err(format!(
+            "卸载脚本不存在：{}，请手动删除安装目录",
+            script.display()
+        ));
+    }
+
+    #[cfg(unix)]
+    let status = Command::new("bash").arg(&script).status();
+    #[cfg(windows)]
+    let status = Command::new("cmd").args(["/C", &script.to_string_lossy()]).status();
+
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("卸载脚本退出码：{}", s.code().unwrap_or(-1))),
+        Err(e) => Err(format!("执行卸载脚本失败：{e}")),
+    }
 }
 
 #[tauri::command]
@@ -177,8 +212,8 @@ fn main() {
             load_session,
             clear_session,
             write_platform_config,
-            get_platform_doc_url,
             open_url,
+            run_uninstall,
             read_deploy_meta,
             get_default_install_path
         ])

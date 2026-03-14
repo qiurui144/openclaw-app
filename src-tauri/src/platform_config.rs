@@ -2,54 +2,44 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Platform {
-    WeWork,
-    DingTalk,
-    Feishu,
-}
-
-impl Platform {
-    pub fn channel_key(&self) -> &'static str {
-        match self {
-            Platform::WeWork    => "wecom",
-            Platform::DingTalk  => "dingtalk",
-            Platform::Feishu    => "feishu",
-        }
-    }
-
-    pub fn doc_url(&self) -> &'static str {
-        match self {
-            Platform::WeWork =>
-                "https://work.weixin.qq.com/api/doc/90000/90136/91770",
-            Platform::DingTalk =>
-                "https://open.dingtalk.com/document/robots/custom-robot-access",
-            Platform::Feishu =>
-                "https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot",
-        }
-    }
-}
-
+/// 企业微信自建应用凭据（corpId + corpSecret + agentId，Stream 长连接双向通信）
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PlatformEntry {
-    pub platform: Platform,
-    pub webhook_url: String,
+pub struct WecomConfig {
+    pub corp_id: String,
+    pub corp_secret: String,
+    pub agent_id: String,
 }
 
-/// QQ 开放平台机器人凭据（与普通 Webhook 平台不同，需要 AppID + AppSecret）
+/// 钉钉应用凭据（clientId/AppKey + clientSecret/AppSecret，Stream 长连接双向通信）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DingtalkConfig {
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+/// 飞书应用机器人凭据（App ID + App Secret，WebSocket 长连接，无需公网 IP）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FeishuConfig {
+    pub app_id: String,
+    pub app_secret: String,
+}
+
+/// QQ 开放平台机器人凭据（AppID + AppSecret，回调推送模式）
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct QqConfig {
     pub app_id: String,
-    pub app_secret: String,  // 用于 ED25519 签名验证和换取 AccessToken
+    pub app_secret: String,
 }
 
-pub fn write_platform_config(
-    install_path: &str,
-    platforms: &[PlatformEntry],
-    qq: Option<&QqConfig>,
-) -> Result<()> {
-    write_platform_config_to(config_dir(), install_path, platforms, qq)
+pub struct PlatformConfigs<'a> {
+    pub wecom: Option<&'a WecomConfig>,
+    pub dingtalk: Option<&'a DingtalkConfig>,
+    pub feishu: Option<&'a FeishuConfig>,
+    pub qq: Option<&'a QqConfig>,
+}
+
+pub fn write_platform_config(install_path: &str, cfg: PlatformConfigs<'_>) -> Result<()> {
+    write_platform_config_to(config_dir(), install_path, cfg)
 }
 
 fn config_dir() -> PathBuf {
@@ -61,10 +51,13 @@ fn config_dir() -> PathBuf {
 fn write_platform_config_to(
     config_dir: PathBuf,
     _install_path: &str,
-    platforms: &[PlatformEntry],
-    qq: Option<&QqConfig>,
+    cfg: PlatformConfigs<'_>,
 ) -> Result<()> {
-    if platforms.is_empty() && qq.is_none() { return Ok(()); }
+    let any = cfg.wecom.is_some() || cfg.dingtalk.is_some()
+        || cfg.feishu.is_some() || cfg.qq.is_some();
+    if !any {
+        return Ok(());
+    }
 
     let config_path = config_dir.join("openclaw.json");
 
@@ -75,35 +68,55 @@ fn write_platform_config_to(
         serde_json::json!({})
     };
 
-    let channels = config["channels"]
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    let mut channels_map = channels;
+    let channels = config["channels"].as_object().cloned().unwrap_or_default();
+    let mut ch = channels;
 
-    for entry in platforms {
-        channels_map.insert(
-            entry.platform.channel_key().to_string(),
-            serde_json::json!({ "webhookUrl": entry.webhook_url }),
-        );
-    }
-
-    // QQ 机器人使用 AppID + AppSecret（ED25519 签名验证），而非 webhookUrl
-    if let Some(q) = qq {
-        if !q.app_id.is_empty() && !q.app_secret.is_empty() {
-            channels_map.insert(
-                "qq".to_string(),
-                serde_json::json!({
-                    "appId": q.app_id,
-                    "appSecret": q.app_secret,
-                    // 回调路径由 OpenClaw 服务固定提供，用户需将此路径注册到 QQ 开放平台
-                    "callbackPath": "/webhook/qq",
-                }),
-            );
+    // 企业微信：自建应用，agent 子对象
+    if let Some(w) = cfg.wecom {
+        if !w.corp_id.is_empty() && !w.corp_secret.is_empty() && !w.agent_id.is_empty() {
+            ch.insert("wecom".to_string(), serde_json::json!({
+                "agent": {
+                    "corpId": w.corp_id,
+                    "corpSecret": w.corp_secret,
+                    "agentId": w.agent_id,
+                }
+            }));
         }
     }
 
-    config["channels"] = serde_json::Value::Object(channels_map);
+    // 钉钉：Stream 长连接，clientId + clientSecret
+    if let Some(d) = cfg.dingtalk {
+        if !d.client_id.is_empty() && !d.client_secret.is_empty() {
+            ch.insert("dingtalk".to_string(), serde_json::json!({
+                "clientId": d.client_id,
+                "clientSecret": d.client_secret,
+            }));
+        }
+    }
+
+    // 飞书：应用机器人，WebSocket 长连接
+    if let Some(f) = cfg.feishu {
+        if !f.app_id.is_empty() && !f.app_secret.is_empty() {
+            ch.insert("feishu".to_string(), serde_json::json!({
+                "appId": f.app_id,
+                "appSecret": f.app_secret,
+                "connectionMode": "websocket",
+            }));
+        }
+    }
+
+    // QQ：回调推送，AppID + AppSecret
+    if let Some(q) = cfg.qq {
+        if !q.app_id.is_empty() && !q.app_secret.is_empty() {
+            ch.insert("qqbot".to_string(), serde_json::json!({
+                "appId": q.app_id,
+                "appSecret": q.app_secret,
+                "callbackPath": "/webhook/qq",
+            }));
+        }
+    }
+
+    config["channels"] = serde_json::Value::Object(ch);
 
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -123,43 +136,68 @@ mod tests {
         tmp
     }
 
-    #[test]
-    fn test_platform_channel_key() {
-        assert_eq!(Platform::Feishu.channel_key(), "feishu");
-        assert_eq!(Platform::DingTalk.channel_key(), "dingtalk");
-        assert_eq!(Platform::WeWork.channel_key(), "wecom");
+    fn empty() -> PlatformConfigs<'static> {
+        PlatformConfigs { wecom: None, dingtalk: None, feishu: None, qq: None }
     }
 
     #[test]
-    fn test_doc_url_not_empty() {
-        for p in [Platform::WeWork, Platform::DingTalk, Platform::Feishu] {
-            assert!(!p.doc_url().is_empty());
-            assert!(p.doc_url().starts_with("https://"));
-        }
-    }
-
-    #[test]
-    fn test_write_platform_config_creates_channels() {
+    fn test_write_wecom_config() {
         let tmp = make_temp_dir();
         let config_dir = tmp.join(".openclaw");
         std::fs::create_dir_all(&config_dir).unwrap();
-        std::fs::write(
-            config_dir.join("openclaw.json"),
-            r#"{"gateway":{"port":18789}}"#
-        ).unwrap();
 
-        let entries = vec![
-            PlatformEntry {
-                platform: Platform::Feishu,
-                webhook_url: "https://open.feishu.cn/hook/test".into(),
-            },
-        ];
-        write_platform_config_to(config_dir.clone(), "/tmp/install", &entries, None).unwrap();
+        let wecom = WecomConfig {
+            corp_id: "ww123456".into(),
+            corp_secret: "secret".into(),
+            agent_id: "1000001".into(),
+        };
+        write_platform_config_to(config_dir.clone(), "/tmp/install", PlatformConfigs {
+            wecom: Some(&wecom), ..empty()
+        }).unwrap();
 
         let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&data).unwrap();
-        assert_eq!(v["channels"]["feishu"]["webhookUrl"], "https://open.feishu.cn/hook/test");
-        assert_eq!(v["gateway"]["port"], 18789);
+        assert_eq!(v["channels"]["wecom"]["agent"]["corpId"], "ww123456");
+        assert_eq!(v["channels"]["wecom"]["agent"]["agentId"], "1000001");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_write_dingtalk_config() {
+        let tmp = make_temp_dir();
+        let config_dir = tmp.join(".openclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let dt = DingtalkConfig {
+            client_id: "dingappkey".into(),
+            client_secret: "dingsecret".into(),
+        };
+        write_platform_config_to(config_dir.clone(), "/tmp/install", PlatformConfigs {
+            dingtalk: Some(&dt), ..empty()
+        }).unwrap();
+
+        let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(v["channels"]["dingtalk"]["clientId"], "dingappkey");
+        assert_eq!(v["channels"]["dingtalk"]["clientSecret"], "dingsecret");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_write_feishu_config() {
+        let tmp = make_temp_dir();
+        let config_dir = tmp.join(".openclaw");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let feishu = FeishuConfig { app_id: "cli_test".into(), app_secret: "fs_secret".into() };
+        write_platform_config_to(config_dir.clone(), "/tmp/install", PlatformConfigs {
+            feishu: Some(&feishu), ..empty()
+        }).unwrap();
+
+        let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(v["channels"]["feishu"]["appId"], "cli_test");
+        assert_eq!(v["channels"]["feishu"]["connectionMode"], "websocket");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -169,24 +207,45 @@ mod tests {
         let config_dir = tmp.join(".openclaw");
         std::fs::create_dir_all(&config_dir).unwrap();
 
-        let qq = QqConfig {
-            app_id: "12345678".into(),
-            app_secret: "my_secret".into(),
-        };
-        write_platform_config_to(config_dir.clone(), "/tmp/install", &[], Some(&qq)).unwrap();
+        let qq = QqConfig { app_id: "12345678".into(), app_secret: "my_secret".into() };
+        write_platform_config_to(config_dir.clone(), "/tmp/install", PlatformConfigs {
+            qq: Some(&qq), ..empty()
+        }).unwrap();
 
         let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&data).unwrap();
-        assert_eq!(v["channels"]["qq"]["appId"], "12345678");
-        assert_eq!(v["channels"]["qq"]["callbackPath"], "/webhook/qq");
+        assert_eq!(v["channels"]["qqbot"]["appId"], "12345678");
+        assert_eq!(v["channels"]["qqbot"]["callbackPath"], "/webhook/qq");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
-    fn test_write_empty_platforms_is_noop() {
+    fn test_preserves_existing_config() {
         let tmp = make_temp_dir();
         let config_dir = tmp.join(".openclaw");
-        let result = write_platform_config_to(config_dir.clone(), "/tmp/install", &[], None);
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("openclaw.json"),
+            r#"{"gateway":{"port":18789}}"#,
+        ).unwrap();
+
+        let feishu = FeishuConfig { app_id: "cli_x".into(), app_secret: "s".into() };
+        write_platform_config_to(config_dir.clone(), "/tmp/install", PlatformConfigs {
+            feishu: Some(&feishu), ..empty()
+        }).unwrap();
+
+        let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(v["gateway"]["port"], 18789);
+        assert_eq!(v["channels"]["feishu"]["appId"], "cli_x");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_write_empty_is_noop() {
+        let tmp = make_temp_dir();
+        let config_dir = tmp.join(".openclaw");
+        let result = write_platform_config_to(config_dir.clone(), "/tmp/install", empty());
         assert!(result.is_ok());
         assert!(!config_dir.join("openclaw.json").exists());
         std::fs::remove_dir_all(&tmp).ok();

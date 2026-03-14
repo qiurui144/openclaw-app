@@ -1,22 +1,29 @@
 import { useRouter } from "vue-router";
 import { useWizardStore } from "@/stores/wizard";
 
-const ROUTE_ORDER_BASE = [
+const INSTALL_ROUTES = [
   "welcome", "check", "source", "install", "service", "ai-token", "platform", "deploy", "finish",
 ];
+
+const INSTALL_ONLINE_ROUTES = [
+  "welcome", "check", "source", "clash-disclaimer", "clash-config",
+  "install", "service", "ai-token", "platform", "deploy", "finish",
+];
+
+const UPDATE_ROUTES = ["welcome", "update", "finish"];
+
+const UNINSTALL_ROUTES = ["welcome", "uninstall"];
 
 export function useWizardNav() {
   const router = useRouter();
   const wizard = useWizardStore();
 
-  function routeOrder() {
-    if (wizard.sourceMode === "online") {
-      return [
-        "welcome", "check", "source", "clash-disclaimer", "clash-config",
-        "install", "service", "ai-token", "platform", "deploy", "finish",
-      ];
-    }
-    return ROUTE_ORDER_BASE;
+  function routeOrder(): string[] {
+    if (wizard.wizardMode === "update") return UPDATE_ROUTES;
+    if (wizard.wizardMode === "uninstall") return UNINSTALL_ROUTES;
+    // install mode
+    if (wizard.sourceMode === "online") return INSTALL_ONLINE_ROUTES;
+    return INSTALL_ROUTES;
   }
 
   function currentIndex() {

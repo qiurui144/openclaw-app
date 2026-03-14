@@ -10,16 +10,28 @@ describe("config store", () => {
     expect(store.servicePort).toBe(18789);
   });
 
-  it("密码不在 toDto() 中暴露给日志", () => {
+  it("密码在 toDto() 中正确传递", () => {
     const store = useConfigStore();
     store.adminPassword = "s3cret!";
     expect(store.toDto().admin_password).toBe("s3cret!");
   });
 
-  it("updatePlatform 更新指定平台", () => {
+  it("未启用任何平台时 toDto() 所有平台配置为 null", () => {
     const store = useConfigStore();
-    store.updatePlatform("wx", { enabled: true, webhookUrl: "https://qyapi.weixin.qq.com/test" });
-    expect(store.platforms.wx.enabled).toBe(true);
+    const dto = store.toDto();
+    expect(dto.wecom_config).toBeNull();
+    expect(dto.dingtalk_config).toBeNull();
+    expect(dto.feishu_config).toBeNull();
+    expect(dto.qq_config).toBeNull();
+  });
+
+  it("启用飞书并填写凭据后 toDto() 包含 feishu_config", () => {
+    const store = useConfigStore();
+    store.feishuEnabled = true;
+    store.feishuAppId = "cli_test";
+    store.feishuAppSecret = "fs_secret";
+    const dto = store.toDto();
+    expect(dto.feishu_config).toEqual({ app_id: "cli_test", app_secret: "fs_secret" });
   });
 
   it("isPasswordValid 长度<8 为 false", () => {
