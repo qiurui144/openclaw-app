@@ -43,6 +43,14 @@ jobs:
         env:
           DEP_TAURI_DEV: "true"
 
+      - name: 创建 bundled 编译占位资源
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p resources/binaries/linux resources/binaries/windows
+          touch resources/binaries/linux/node resources/binaries/windows/node.exe
+          echo '{}' > resources/binaries/linux/openclaw.tgz
+          echo '{}' > resources/binaries/windows/openclaw.tgz
+
       - name: cargo check (bundled feature, Linux only)
         if: runner.os == 'Linux'
         working-directory: src-tauri
