@@ -113,19 +113,44 @@ pub async fn start_deploy(config: DeployConfig, window: Window) -> Result<()> {
     crate::platform_config::write_platform_config(
         &config.install_path, &config.platforms)?;
 
-    // Step 7: 注册系统服务
+    // Step 7: 注册系统服务（失败不阻断部署，仅记录警告）
     if config.install_service {
         emit_progress(&window, 7, TOTAL, "注册系统服务…");
-        install_service(&config)?;
+        if let Err(e) = install_service(&config) {
+            let _ = window.emit("deploy:progress", DeployProgress {
+                step: 7, total: TOTAL, percent: 63,
+                message: format!("系统服务注册失败（{}），将直接启动进程", e),
+            });
+        }
     }
 
     // Step 8: 启动服务
     emit_progress(&window, 8, TOTAL, "启动 OpenClaw 服务…");
     start_service(&config)?;
 
-    // Step 9: 健康检查
-    emit_progress(&window, 9, TOTAL, "等待服务就绪…");
-    health_check(config.service_port).await?;
+    // Step 9: 健康检查（每 2 秒更新进度）
+    for i in 0..15u32 {
+        let pct = 82 + i * (95 - 82) / 15;
+        let _ = window.emit("deploy:progress", DeployProgress {
+            step: 9, total: TOTAL, percent: pct,
+            message: format!("等待服务就绪… ({}/15)", i + 1),
+        });
+        let ok = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            tokio::net::TcpStream::connect(format!("127.0.0.1:{}", config.service_port))
+        ).await.map(|r| r.is_ok()).unwrap_or(false);
+        if ok {
+            if reqwest::get(format!("http://127.0.0.1:{}/health", config.service_port))
+                .await.map(|r| r.status().is_success()).unwrap_or(false)
+            {
+                break;
+            }
+        }
+        if i == 14 {
+            anyhow::bail!("服务在 30 秒内未能正常启动，请查看日志");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 
     // Step 10: 生成卸载脚本
     emit_progress(&window, 10, TOTAL, "生成卸载脚本…");
@@ -271,12 +296,13 @@ fn install_service(config: &DeployConfig) -> Result<()> {
             node_bin.display(), script.display(), port
         );
         std::fs::write(unit_dir.join("openclaw.service"), unit)?;
-        std::process::Command::new("systemctl")
-            .args(["--user", "daemon-reload"])
+        // 超时 10 秒，避免无 DBus session 时永久阻塞
+        std::process::Command::new("timeout")
+            .args(["10", "systemctl", "--user", "daemon-reload"])
             .status()?;
         if config.start_on_boot {
-            std::process::Command::new("systemctl")
-                .args(["--user", "enable", "openclaw.service"])
+            std::process::Command::new("timeout")
+                .args(["10", "systemctl", "--user", "enable", "openclaw.service"])
                 .status()?;
         }
     }
@@ -296,9 +322,26 @@ fn install_service(config: &DeployConfig) -> Result<()> {
 
 fn start_service(config: &DeployConfig) -> Result<()> {
     #[cfg(target_os = "linux")]
-    std::process::Command::new("systemctl")
-        .args(["--user", "start", "openclaw.service"])
-        .status()?;
+    {
+        // 先尝试 systemctl 启动（超时 10 秒），失败则直接 spawn 进程
+        let ok = std::process::Command::new("timeout")
+            .args(["10", "systemctl", "--user", "start", "openclaw.service"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            let node_bin = PathBuf::from(&config.install_path)
+                .join("node").join("node");
+            let script = PathBuf::from(&config.install_path)
+                .join("openclaw_pkg").join("node_modules")
+                .join("openclaw").join("openclaw.mjs");
+            std::process::Command::new(&node_bin)
+                .args([script.to_str().unwrap(), "gateway",
+                       "--port", &config.service_port.to_string()])
+                .env("NODE_ENV", "production")
+                .spawn()?;
+        }
+    }
     #[cfg(target_os = "windows")]
     std::process::Command::new("schtasks")
         .args(["/Run", "/TN", "OpenClaw Gateway"])
