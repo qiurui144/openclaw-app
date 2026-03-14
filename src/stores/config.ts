@@ -137,5 +137,5 @@ export const useConfigStore = defineStore("config", () => {
 });
 
 function defaultInstallPath(): string {
-  return "/opt/openclaw";
+  return ""; // 由 InstallConfigPage 通过 get_default_install_path 命令填充
 }

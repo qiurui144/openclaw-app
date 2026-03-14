@@ -17,7 +17,7 @@
       <div class="field">
         <label>安装目录</label>
         <div class="input-row">
-          <input type="text" v-model="config.installPath" @input="validate" />
+          <input type="text" v-model="config.installPath" :placeholder="defaultPath" @input="validate" />
         </div>
         <span class="hint">推荐路径：{{ defaultPath }}</span>
       </div>
@@ -53,7 +53,7 @@ import { tauri } from "@/composables/useTauri";
 const config = useConfigStore();
 const wizard = useWizardStore();
 const { next } = useWizardNav();
-const defaultPath = ref("/opt/openclaw");
+const defaultPath = ref("");
 
 onMounted(async () => {
   try {
