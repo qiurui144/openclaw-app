@@ -114,11 +114,18 @@ jobs:
       - name: 安装打包依赖
         run: brew install coreutils
 
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: 下载 openclaw.tgz
         run: |
-          curl -fsSL \
-            "https://github.com/openclaw/openclaw/releases/latest/download/openclaw.tgz" \
-            -o resources/openclaw.tgz
+          mkdir -p resources
+          OC_VERSION=$(npm view openclaw version --registry https://registry.npmmirror.com 2>/dev/null || npm view openclaw version)
+          OC_URL=$(npm view "openclaw@${OC_VERSION}" dist.tarball --registry https://registry.npmmirror.com 2>/dev/null || npm view "openclaw@${OC_VERSION}" dist.tarball)
+          echo "下载 openclaw@${OC_VERSION}: ${OC_URL}"
+          curl -fL "$OC_URL" -o resources/openclaw.tgz
 
       - name: 打包 macOS Full Bundle (arm64)
         run: bash scripts/macos/build_bundle.sh
