@@ -47,6 +47,8 @@ export const tauri = {
     invoke<void>("apply_openclaw_update", { installPath, downloadUrl, sha256, proxyUrl: proxyUrl ?? null }),
   readDeployMeta: () => invoke<DeployMeta | null>("read_deploy_meta"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
+  getDefaultInstallPath: () => invoke<string>("get_default_install_path"),
+  healthCheck: (port: number) => invoke<void>("health_check", { port }),
 };
 
 export function useDeployEvents(

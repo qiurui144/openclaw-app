@@ -31,6 +31,15 @@
         <button class="btn-primary" @click="openConsole">🌐 打开管理控制台</button>
       </div>
 
+      <div class="next-steps">
+        <div class="ns-title">接下来您可以：</div>
+        <div class="ns-item">🔐 <span>用设置的管理员密码登录控制台</span></div>
+        <div class="ns-item">🔌 <span>在控制台「平台管理」中添加企业微信/钉钉/飞书机器人</span></div>
+        <div class="ns-item">🧩 <span>在「Skills 管理」中安装所需的 AI 技能插件</span></div>
+        <div class="ns-item">📋 <span>在「日志」中监控机器人运行状态</span></div>
+        <div class="ns-item">🔄 <span>通过控制台「系统设置」检查版本更新</span></div>
+      </div>
+
       <div class="skills-section" v-if="updatableSkills.length">
         <h3>可更新的 Skills（{{ updatableSkills.length }}）</h3>
         <div class="skill-list">
@@ -119,6 +128,13 @@ h2 { font-size: 24px; font-weight: 700; margin-top: 8px; }
 .skill-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .skill-row { display: flex; justify-content: space-between; font-size: 13px; }
 .version { color: var(--color-muted); }
+.next-steps {
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius); padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ns-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.ns-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #475569; }
 .feedback { text-align: center; font-size: 13px; }
 .feedback a { color: var(--color-muted); }
 </style>

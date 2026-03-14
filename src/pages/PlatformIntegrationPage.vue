@@ -4,6 +4,13 @@
       <h2>平台集成（可选）</h2>
       <p class="desc">勾选平台后粘贴 Webhook 地址，机器人即可在群里响应消息。可跳过，安装后在控制台配置。</p>
 
+      <div class="webhook-guide">
+        <strong>什么是 Webhook？</strong>
+        Webhook 是平台提供给您的一个链接地址，用于将企业群的消息实时推送到 OpenClaw。
+        每个平台的群机器人设置页面都有"复制 Webhook"按钮，直接粘贴到下方即可。
+        点击各平台的「如何获取？↗」查看图文教程。
+      </div>
+
       <div class="platform-list">
         <div
           v-for="p in platforms"
@@ -123,6 +130,11 @@ function handleNext() { next(); }
 .platform-page { display: flex; flex-direction: column; gap: 16px; }
 h2 { font-size: 20px; font-weight: 700; }
 .desc { color: var(--color-muted); font-size: 13px; }
+.webhook-guide {
+  background: #f0fdf4; border: 1px solid #bbf7d0;
+  border-radius: var(--radius); padding: 12px 14px;
+  font-size: 12px; line-height: 1.8; color: #166534;
+}
 
 .platform-list { display: flex; flex-direction: column; gap: 10px; }
 

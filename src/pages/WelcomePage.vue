@@ -16,6 +16,23 @@
         </div>
       </div>
 
+      <div class="steps-overview">
+        <div class="steps-title">安装步骤（约 5-10 分钟）</div>
+        <div class="steps-row">
+          <span class="step-pill">1 环境检查</span>
+          <span class="step-sep">→</span>
+          <span class="step-pill">2 选来源</span>
+          <span class="step-sep">→</span>
+          <span class="step-pill">3 配置路径</span>
+          <span class="step-sep">→</span>
+          <span class="step-pill">4 服务设置</span>
+          <span class="step-sep">→</span>
+          <span class="step-pill">5 平台集成</span>
+          <span class="step-sep">→</span>
+          <span class="step-pill">6 一键部署</span>
+        </div>
+      </div>
+
       <div class="feature-grid">
         <div class="feature-card" v-for="f in features" :key="f.icon">
           <span class="f-icon">{{ f.icon }}</span>
@@ -76,6 +93,17 @@ h1 { font-size: 28px; font-weight: 700; }
   display: flex; align-items: center; justify-content: space-between;
 }
 .existing-actions { display: flex; gap: 8px; }
+.steps-overview {
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius); padding: 12px 16px;
+}
+.steps-title { font-size: 12px; color: var(--color-muted); margin-bottom: 8px; }
+.steps-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.step-pill {
+  background: #eff6ff; color: var(--color-primary); border-radius: 12px;
+  padding: 3px 10px; font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+.step-sep { color: var(--color-border); font-size: 12px; }
 .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .feature-card {
   display: flex; gap: 12px; align-items: flex-start;

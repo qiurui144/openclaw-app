@@ -2,15 +2,15 @@
   <WizardLayout @next="handleNext">
     <div class="source-page">
       <h2>选择安装来源</h2>
-      <p class="desc">根据您的网络环境选择合适的安装方式。</p>
+      <p class="desc">根据您的网络环境选择合适的安装方式。Full Bundle 版（离线包）最稳定，推荐优先使用。</p>
 
       <div class="options">
         <label class="option" :class="{ selected: selected === 'bundled', disabled: !hasBundled }">
           <input type="radio" value="bundled" v-model="selected" :disabled="!hasBundled" />
           <span class="opt-icon">📦</span>
           <div>
-            <div class="opt-title">使用内置离线包 <span v-if="!hasBundled">(此版本不含)</span></div>
-            <div class="opt-desc">无需网络，直接安装，最稳定</div>
+            <div class="opt-title">使用内置离线包（推荐）<span v-if="!hasBundled" class="unavail">此版本不含，请下载 Full Bundle</span></div>
+            <div class="opt-desc">无需网络，离线直接安装，最稳定。适合内网环境或网络不好的情况。</div>
           </div>
         </label>
 
@@ -19,7 +19,7 @@
           <span class="opt-icon">🌐</span>
           <div>
             <div class="opt-title">从网络下载最新版本</div>
-            <div class="opt-desc">需要访问 GitHub Release，可配置代理</div>
+            <div class="opt-desc">需要访问 npm/GitHub，支持配置 Clash 代理。适合网络畅通的环境。</div>
           </div>
         </label>
 
@@ -28,7 +28,7 @@
           <span class="opt-icon">📁</span>
           <div>
             <div class="opt-title">导入本地安装包</div>
-            <div class="opt-desc">使用已下载的 ZIP 文件</div>
+            <div class="opt-desc">使用已手动下载的 openclaw.tgz 压缩包。适合在有网络的机器上提前下载，再拷贝到内网安装。</div>
           </div>
         </label>
       </div>
@@ -102,7 +102,8 @@ h2 { font-size: 20px; font-weight: 700; }
 .option.disabled { opacity: .5; cursor: not-allowed; }
 .opt-icon { font-size: 24px; }
 .opt-title { font-weight: 600; }
-.opt-desc { font-size: 12px; color: var(--color-muted); }
+.opt-desc { font-size: 12px; color: var(--color-muted); margin-top: 2px; }
+.unavail { font-size: 11px; color: var(--color-error); font-weight: 400; margin-left: 6px; }
 .zip-zone {
   border: 2px dashed var(--color-border); border-radius: var(--radius);
   padding: 24px; text-align: center; cursor: pointer;

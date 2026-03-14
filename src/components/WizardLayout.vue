@@ -6,7 +6,9 @@
         <span class="brand-name">OpenClaw 部署向导</span>
       </div>
       <StepIndicator :steps="visibleSteps" :current="currentIndex()" />
+      <button class="help-btn" @click="showManual = true" title="操作手册">?</button>
     </header>
+    <ManualModal v-model="showManual" />
 
     <main class="wizard-body">
       <slot />
@@ -30,11 +32,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import StepIndicator from "./StepIndicator.vue";
+import ManualModal from "./ManualModal.vue";
 import { useWizardStore } from "@/stores/wizard";
 import { useWizardNav } from "@/composables/useWizardNav";
+
+const showManual = ref(false);
 
 withDefaults(defineProps<{
   showFooter?: boolean;
@@ -80,13 +85,22 @@ const visibleSteps = computed(() => [
 }
 
 .wizard-header {
-  padding: 16px 24px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   gap: 24px;
   background: var(--color-surface);
 }
+
+.help-btn {
+  margin-left: auto; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid var(--color-border); background: none;
+  font-size: 14px; font-weight: 700; color: var(--color-muted);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.help-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .brand-icon { font-size: 20px; }

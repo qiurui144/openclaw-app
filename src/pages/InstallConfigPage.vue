@@ -2,6 +2,17 @@
   <WizardLayout @next="handleNext">
     <div class="install-config">
       <h2>安装路径</h2>
+      <p class="step-intro">选择 OpenClaw 的安装目录和系统服务方式。</p>
+
+      <StepHelp>
+        <ul>
+          <li><strong>安装目录</strong>：OpenClaw 程序文件存放位置。留空将使用推荐路径。</li>
+          <li><strong>root/管理员运行</strong>：默认安装到 <code>/opt/openclaw</code>（Linux）或 <code>C:\Program Files\openclaw</code>（Windows），注册<strong>系统级服务</strong>，开机自动运行无需用户登录。</li>
+          <li><strong>普通用户运行</strong>：默认安装到 <code>~/openclaw</code>（Linux）或 <code>%LOCALAPPDATA%\openclaw</code>（Windows），注册<strong>用户级服务</strong>，需要用户登录后才会自启。</li>
+          <li><strong>注册系统服务</strong>（推荐）：将 OpenClaw 注册为 systemd/计划任务服务，进程崩溃后自动重启。</li>
+        </ul>
+        <div class="tip">💡 服务器部署建议以 root/管理员身份运行向导，确保开机免登录自启。</div>
+      </StepHelp>
 
       <div class="field">
         <label>安装目录</label>
@@ -24,6 +35,7 @@
           <input type="checkbox" v-model="config.startOnBoot" />
           开机自动启动
         </label>
+        <p class="hint-sm">系统启动时自动运行 OpenClaw 服务。</p>
       </div>
     </div>
   </WizardLayout>
@@ -32,16 +44,25 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import WizardLayout from "@/components/WizardLayout.vue";
+import StepHelp from "@/components/StepHelp.vue";
 import { useConfigStore } from "@/stores/config";
 import { useWizardStore } from "@/stores/wizard";
 import { useWizardNav } from "@/composables/useWizardNav";
+import { tauri } from "@/composables/useTauri";
 
 const config = useConfigStore();
 const wizard = useWizardStore();
 const { next } = useWizardNav();
 const defaultPath = ref("/opt/openclaw");
 
-onMounted(() => { validate(); });
+onMounted(async () => {
+  try {
+    const p = await tauri.getDefaultInstallPath();
+    defaultPath.value = p;
+    if (!config.installPath) config.installPath = p;
+  } catch { /* ignore */ }
+  validate();
+});
 
 function validate() {
   wizard.setReady(!!config.installPath.trim());
@@ -53,6 +74,7 @@ function handleNext() { next(); }
 <style scoped>
 .install-config { display: flex; flex-direction: column; gap: 20px; }
 h2 { font-size: 20px; font-weight: 700; }
+.step-intro { font-size: 13px; color: var(--color-muted); margin-top: -12px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 label { font-weight: 500; font-size: 13px; }
 .checkbox-row { display: flex; gap: 8px; align-items: center; cursor: pointer; }

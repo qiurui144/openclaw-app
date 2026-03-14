@@ -2,6 +2,7 @@
   <WizardLayout :show-footer="false">
     <div class="deploy-page">
       <h2>正在部署</h2>
+      <p class="deploy-intro">向导正在自动执行以下操作：解压资源 → 写入配置 → 安装服务 → 启动服务 → 健康检查。请展开日志查看详细进度。</p>
 
       <div class="status-row">
         <span class="status-icon" :class="wizard.deployStatus">{{ statusIcon }}</span>
@@ -95,6 +96,7 @@ function buildSourceMode() {
 <style scoped>
 .deploy-page { display: flex; flex-direction: column; gap: 16px; }
 h2 { font-size: 20px; font-weight: 700; }
+.deploy-intro { font-size: 13px; color: var(--color-muted); margin-top: -8px; }
 .status-row { display: flex; align-items: center; gap: 12px; }
 .status-icon { font-size: 24px; }
 .progress-track { height: 8px; background: var(--color-border); border-radius: 4px; overflow: hidden; }
