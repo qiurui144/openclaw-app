@@ -36,18 +36,19 @@ jobs:
       - run: npm ci
 
       - name: 构建 Lite AppImage
-        run: npm run tauri build -- --target x86_64-unknown-linux-gnu
+        # 不指定 --target，CI runner 默认 x86_64-unknown-linux-gnu，输出到 target/release/
+        run: npm run tauri build
         env:
           OC_BUILD_BUNDLED: "0"
           OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
 
-      - name: 重命名 Lite AppImage
+      - name: 暂存 Lite AppImage
         run: |
-          cd src-tauri/target/release/bundle/appimage/
-          for f in *.AppImage; do
-            mv "$f" "${f%.AppImage}-lite.AppImage"
+          mkdir -p dist/linux
+          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+            cp "$f" "dist/linux/$(basename ${f%.AppImage})-lite.AppImage"
           done
-          ls -lh *.AppImage
+          ls -lh dist/linux/
 
       - name: 获取内嵌资源
         run: |
@@ -63,19 +64,17 @@ jobs:
           OC_BUILD_BUNDLED: "1"
           OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
 
-      - name: 重命名 Full Bundle AppImage
+      - name: 暂存 Full Bundle AppImage
         run: |
-          cd src-tauri/target/release/bundle/appimage/
-          for f in *.AppImage; do
-            [[ "$f" == *-lite.AppImage ]] && continue
-            mv "$f" "${f%.AppImage}-full.AppImage"
+          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+            cp "$f" "dist/linux/$(basename ${f%.AppImage})-full.AppImage"
           done
-          ls -lh *.AppImage
+          ls -lh dist/linux/
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
-          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          path: dist/linux/*.AppImage
 
   build-windows:
     name: Build Windows NSIS
@@ -99,14 +98,14 @@ jobs:
         env:
           OC_BUILD_BUNDLED: "0"
 
-      - name: 重命名 Lite NSIS
+      - name: 暂存 Lite NSIS
         shell: bash
         run: |
-          cd src-tauri/target/release/bundle/nsis/
-          for f in *.exe; do
-            mv "$f" "${f%.exe}-lite.exe"
+          mkdir -p dist/windows
+          for f in src-tauri/target/release/bundle/nsis/*.exe; do
+            cp "$f" "dist/windows/$(basename ${f%.exe})-lite.exe"
           done
-          ls -lh *.exe
+          ls -lh dist/windows/
 
       - name: 获取 Windows 内嵌资源
         shell: bash
@@ -157,20 +156,18 @@ jobs:
         env:
           OC_BUILD_BUNDLED: "1"
 
-      - name: 重命名 Full Bundle NSIS
+      - name: 暂存 Full Bundle NSIS
         shell: bash
         run: |
-          cd src-tauri/target/release/bundle/nsis/
-          for f in *.exe; do
-            [[ "$f" == *-lite.exe ]] && continue
-            mv "$f" "${f%.exe}-full.exe"
+          for f in src-tauri/target/release/bundle/nsis/*.exe; do
+            cp "$f" "dist/windows/$(basename ${f%.exe})-full.exe"
           done
-          ls -lh *.exe
+          ls -lh dist/windows/
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-nsis
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: dist/windows/*.exe
 
   build-macos:
     name: Build macOS Bundle
@@ -210,7 +207,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          # 将辅助脚本同时复制到两个目录
           cp scripts/macos/detect.sh scripts/macos/service.sh scripts/macos/clash.sh dist/macos/
+          cp scripts/macos/detect.sh scripts/macos/service.sh scripts/macos/clash.sh dist/macos/x64/
           cd dist/macos
           zip -r "../../openclaw-wizard-${TAG}-macos-arm64.zip" install.command detect.sh service.sh clash.sh
           cd x64
