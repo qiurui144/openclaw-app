@@ -278,60 +278,79 @@ fn install_service(config: &DeployConfig) -> Result<()> {
         .join("openclaw")
         .join("openclaw.mjs");
     let port = config.service_port;
+    let elevated = crate::system_check::is_elevated();
 
     #[cfg(target_os = "linux")]
     {
-        let unit_dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".config/systemd/user");
-        std::fs::create_dir_all(&unit_dir)?;
-        let unit = format!(
+        let unit_content = format!(
             "[Unit]\nDescription=OpenClaw Gateway\nAfter=network.target\n\n\
              [Service]\nType=simple\n\
              ExecStart={} {} gateway --port {}\n\
              Restart=on-failure\nRestartSec=10\n\
              Environment=NODE_ENV=production\n\
              StandardOutput=journal\nStandardError=journal\n\n\
-             [Install]\nWantedBy=default.target\n",
-            node_bin.display(), script.display(), port
+             [Install]\nWantedBy={}\n",
+            node_bin.display(), script.display(), port,
+            if elevated { "multi-user.target" } else { "default.target" }
         );
-        std::fs::write(unit_dir.join("openclaw.service"), unit)?;
-        // 超时 10 秒，避免无 DBus session 时永久阻塞
-        std::process::Command::new("timeout")
-            .args(["10", "systemctl", "--user", "daemon-reload"])
-            .status()?;
-        if config.start_on_boot {
+
+        if elevated {
+            // root：写入系统级 unit，无需 D-Bus session
+            let unit_dir = PathBuf::from("/etc/systemd/system");
+            std::fs::create_dir_all(&unit_dir)?;
+            std::fs::write(unit_dir.join("openclaw.service"), unit_content)?;
+            std::process::Command::new("systemctl").args(["daemon-reload"]).status()?;
+            if config.start_on_boot {
+                std::process::Command::new("systemctl")
+                    .args(["enable", "openclaw.service"]).status()?;
+            }
+        } else {
+            // 普通用户：写入用户级 unit，需要 D-Bus session
+            let unit_dir = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".config/systemd/user");
+            std::fs::create_dir_all(&unit_dir)?;
+            std::fs::write(unit_dir.join("openclaw.service"), unit_content)?;
             std::process::Command::new("timeout")
-                .args(["10", "systemctl", "--user", "enable", "openclaw.service"])
-                .status()?;
+                .args(["10", "systemctl", "--user", "daemon-reload"]).status()?;
+            if config.start_on_boot {
+                std::process::Command::new("timeout")
+                    .args(["10", "systemctl", "--user", "enable", "openclaw.service"]).status()?;
+            }
         }
     }
     #[cfg(target_os = "windows")]
     {
         let cmd = format!("\"{}\" \"{}\" gateway --port {}",
             node_bin.display(), script.display(), port);
-        std::process::Command::new("schtasks")
-            .args(["/Create", "/F",
-                "/SC", "ONLOGON",
-                "/TN", "OpenClaw Gateway",
-                "/TR", &cmd])
-            .status()?;
+        let mut args = vec!["/Create", "/F", "/SC", "ONLOGON",
+                            "/TN", "OpenClaw Gateway", "/TR", &cmd];
+        // 管理员：以 SYSTEM 身份运行，普通用户：以当前用户身份运行
+        if elevated { args.extend(["/RU", "SYSTEM"]); }
+        std::process::Command::new("schtasks").args(&args).status()?;
     }
     Ok(())
 }
 
 fn start_service(config: &DeployConfig) -> Result<()> {
+    let elevated = crate::system_check::is_elevated();
+
     #[cfg(target_os = "linux")]
     {
-        // 先尝试 systemctl 启动（超时 10 秒），失败则直接 spawn 进程
-        let ok = std::process::Command::new("timeout")
-            .args(["10", "systemctl", "--user", "start", "openclaw.service"])
+        let (base_cmd, extra_args): (&str, &[&str]) = if elevated {
+            ("systemctl", &["start", "openclaw.service"])
+        } else {
+            ("timeout", &["10", "systemctl", "--user", "start", "openclaw.service"])
+        };
+        let ok = std::process::Command::new(base_cmd)
+            .args(extra_args)
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
+
         if !ok {
-            let node_bin = PathBuf::from(&config.install_path)
-                .join("node").join("node");
+            // 回退：直接 spawn node 进程（适用于无 systemd 环境）
+            let node_bin = PathBuf::from(&config.install_path).join("node").join("node");
             let script = PathBuf::from(&config.install_path)
                 .join("openclaw_pkg").join("node_modules")
                 .join("openclaw").join("openclaw.mjs");
@@ -343,10 +362,13 @@ fn start_service(config: &DeployConfig) -> Result<()> {
         }
     }
     #[cfg(target_os = "windows")]
-    std::process::Command::new("schtasks")
-        .args(["/Run", "/TN", "OpenClaw Gateway"])
-        .status()?;
-    let _ = config;
+    {
+        // schtasks /Run 对 SYSTEM 任务需要管理员，普通用户任务直接运行
+        std::process::Command::new("schtasks")
+            .args(["/Run", "/TN", "OpenClaw Gateway"])
+            .status()?;
+        let _ = elevated;
+    }
     Ok(())
 }
 
@@ -393,16 +415,25 @@ pub async fn health_check(port: u16) -> Result<()> {
 fn write_uninstall_script(config: &DeployConfig) -> Result<()> {
     #[cfg(unix)]
     {
-        let script = format!(
-            "#!/bin/bash\nset -e\n\
-             systemctl --user stop openclaw.service 2>/dev/null || true\n\
+        let elevated = crate::system_check::is_elevated();
+        let service_cmds = if elevated {
+            "systemctl stop openclaw.service 2>/dev/null || true\n\
+             systemctl disable openclaw.service 2>/dev/null || true\n\
+             rm -f /etc/systemd/system/openclaw.service\n\
+             systemctl daemon-reload\n".to_string()
+        } else {
+            "systemctl --user stop openclaw.service 2>/dev/null || true\n\
              systemctl --user disable openclaw.service 2>/dev/null || true\n\
              rm -f ~/.config/systemd/user/openclaw.service\n\
-             systemctl --user daemon-reload\n\
+             systemctl --user daemon-reload 2>/dev/null || true\n".to_string()
+        };
+        let script = format!(
+            "#!/bin/bash\nset -e\n\
+             {}\
              rm -rf \"{}\"\n\
              rm -rf ~/.openclaw\n\
              echo '✓ OpenClaw 已卸载'\n",
-            config.install_path
+            service_cmds, config.install_path
         );
         let path = PathBuf::from(&config.install_path).join("uninstall.sh");
         std::fs::write(&path, script)?;

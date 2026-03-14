@@ -14,7 +14,65 @@ pub async fn run_all_checks() -> Vec<CheckItem> {
         check_os_version(),
         check_disk_space(),
         check_port_available(18789),
+        check_privilege(),
     ]
+}
+
+/// 检测当前是否以 root/管理员权限运行
+pub fn is_elevated() -> bool {
+    #[cfg(unix)]
+    { unsafe { libc::getuid() == 0 } }
+    #[cfg(windows)]
+    {
+        use std::mem;
+        use std::ptr;
+        // 通过尝试打开只有 admin 才能写的注册表项来判断
+        let result = std::process::Command::new("net")
+            .args(["session"])
+            .output();
+        result.map(|o| o.status.success()).unwrap_or(false)
+    }
+    #[cfg(not(any(unix, windows)))]
+    { false }
+}
+
+fn check_privilege() -> CheckItem {
+    let elevated = is_elevated();
+    #[cfg(target_os = "linux")]
+    {
+        return CheckItem {
+            name: "运行权限".into(),
+            detail: if elevated {
+                "以 root 运行，将安装系统级服务（/etc/systemd/system/）".into()
+            } else {
+                "以普通用户运行，将安装用户级服务（systemctl --user）。\
+                 如需开机自启系统服务，请以 root 或 sudo 运行向导。".into()
+            },
+            passed: true,   // 两种模式都支持，非强制要求
+            required: false,
+        };
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return CheckItem {
+            name: "运行权限".into(),
+            detail: if elevated {
+                "以管理员运行，将安装系统级计划任务（SYSTEM 账户）".into()
+            } else {
+                "以普通用户运行，将安装用户级计划任务。\
+                 如需开机自启系统服务，请右键选择「以管理员身份运行」。".into()
+            },
+            passed: true,
+            required: false,
+        };
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    CheckItem {
+        name: "运行权限".into(),
+        detail: "权限检测不适用于此平台".into(),
+        passed: true,
+        required: false,
+    }
 }
 
 fn check_os_version() -> CheckItem {

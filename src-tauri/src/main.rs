@@ -137,11 +137,21 @@ fn read_deploy_meta() -> Option<serde_json::Value> {
 
 #[tauri::command]
 fn get_default_install_path() -> String {
+    let elevated = system_check::is_elevated();
     #[cfg(target_os = "linux")]
-    return "/opt/openclaw".to_string();
+    return if elevated {
+        "/opt/openclaw".to_string()
+    } else {
+        format!("{}/openclaw",
+            dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "~".to_string()))
+    };
     #[cfg(target_os = "windows")]
-    return format!("{}\\openclaw",
-        std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\Users\\Public".to_string()));
+    return if elevated {
+        r"C:\Program Files\openclaw".to_string()
+    } else {
+        format!("{}\\openclaw",
+            std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\Users\\Public".to_string()))
+    };
     #[cfg(target_os = "macos")]
     return format!("{}/openclaw",
         dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "~".to_string()));
