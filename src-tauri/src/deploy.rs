@@ -98,6 +98,18 @@ pub struct DeployProgress {
     pub message: String,
 }
 
+/// node 二进制的平台路径（完整发行版解压后的位置）
+pub fn node_bin_path(install_path: &str) -> PathBuf {
+    let base = PathBuf::from(install_path).join("node");
+    if cfg!(windows) {
+        base.join("node.exe")
+    } else {
+        // 完整发行版: node/bin/node；兼容旧版单文件: node/node
+        let full = base.join("bin/node");
+        if full.exists() { full } else { base.join("node") }
+    }
+}
+
 /// 向前端发送进度事件
 fn emit_progress(window: &Window, step: u32, total: u32, msg: &str) {
     let _ = window.emit("deploy:progress", DeployProgress {
@@ -115,12 +127,8 @@ pub async fn do_deploy_direct(config: DeployConfig, window: &Window) -> Result<(
 
 async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     const TOTAL: u32 = 11;
-    eprintln!("[deploy] do_deploy START, install_path={}", config.install_path);
-
     // Step 1: 创建安装目录
-    eprintln!("[deploy] step 1: emit_progress...");
     emit_progress(window, 1, TOTAL, "创建安装目录…");
-    eprintln!("[deploy] step 1: emit_progress done");
     let _ = window.emit("deploy:log", format!("安装路径: {}", config.install_path));
     std::fs::create_dir_all(&config.install_path)?;
     let _ = window.emit("deploy:log", "目录创建完成");
@@ -224,12 +232,13 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
 async fn acquire_node(config: &DeployConfig, window: &Window) -> Result<()> {
     let node_dir = PathBuf::from(&config.install_path).join("node");
     std::fs::create_dir_all(&node_dir)?;
-    let dest = node_dir.join(if cfg!(windows) { "node.exe" } else { "node" });
 
     match &config.source_mode {
         SourceMode::Bundled => {
+            // 离线模式：写入内嵌的 node 二进制（fat tarball 已含 node_modules，不需要 npm）
             #[cfg(feature = "bundled")]
             {
+                let dest = node_dir.join(if cfg!(windows) { "node.exe" } else { "node" });
                 #[cfg(target_os = "linux")]
                 let data = include_bytes!("../../resources/binaries/linux/node");
                 #[cfg(target_os = "windows")]
@@ -246,9 +255,11 @@ async fn acquire_node(config: &DeployConfig, window: &Window) -> Result<()> {
             anyhow::bail!("Bundled 模式需要使用 --features bundled 编译（资源文件未内嵌）");
         }
         SourceMode::Online { proxy_url } => {
-            download_node_binary(&dest, proxy_url.as_deref(), window).await?;
+            // Online 模式：直接下载完整 Node.js 发行版（含 npm）
+            download_node_full(&node_dir, proxy_url.as_deref(), window).await?;
         }
         SourceMode::LocalZip(zip_path) => {
+            let dest = node_dir.join(if cfg!(windows) { "node.exe" } else { "node" });
             extract_from_zip(zip_path, "node", &dest)?;
         }
     }
@@ -294,13 +305,97 @@ fn extract_openclaw(config: &DeployConfig, window: &Window) -> Result<()> {
         let mut entry = entry?;
         let path = entry.path()?.to_string_lossy().to_string();
         entry.unpack_in(&dest)?;
-        // 每 50 个文件更新一次日志，避免消息过多
         if i % 50 == 0 {
             let _ = window.emit("deploy:log", format!("解包 {}", path));
         }
     }
     std::fs::remove_file(&tgz)?;
+
+    // Bundled 模式的 fat tarball 已含 node_modules，无需 npm install
+    // Online / LocalZip 模式的 npm tarball 不含 node_modules，需要安装依赖
+    let pkg_dir = dest.join("package");
+    let needs_install = !pkg_dir.join("node_modules").exists();
+    if needs_install {
+        let _ = window.emit("deploy:log", "安装 npm 依赖（npmmirror 源）…");
+        install_npm_dependencies(config, &pkg_dir, window)?;
+    } else {
+        let _ = window.emit("deploy:log", "node_modules 已就绪（离线包）");
+    }
+
     Ok(())
+}
+
+/// 使用部署的 node 执行 npm install 安装 openclaw 的生产依赖
+fn install_npm_dependencies(config: &DeployConfig, pkg_dir: &PathBuf, window: &Window) -> Result<()> {
+    let node_bin = node_bin_path(&config.install_path);
+
+    let npm_cli = find_npm_cli(&node_bin)?;
+    let _ = window.emit("deploy:log", format!("npm cli: {}", npm_cli.display()));
+
+    let proxy_env: Vec<(&str, &str)> = match &config.source_mode {
+        SourceMode::Online { proxy_url: Some(url) } =>
+            vec![("HTTP_PROXY", url.as_str()), ("HTTPS_PROXY", url.as_str())],
+        _ => vec![],
+    };
+
+    let mut cmd = std::process::Command::new(&node_bin);
+    cmd.arg(&npm_cli)
+        .args(["install", "--omit=dev", "--no-audit", "--no-fund",
+               "--registry=https://registry.npmmirror.com"])
+        .current_dir(pkg_dir)
+        .env("NODE_ENV", "production");
+
+    for (k, v) in &proxy_env {
+        cmd.env(k, v);
+    }
+
+    let output = cmd.output()
+        .map_err(|e| anyhow::anyhow!("执行 npm install 失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = window.emit("deploy:log", format!("npm install 错误: {}", stderr));
+        anyhow::bail!("npm install 失败（退出码 {}）:\n{}",
+            output.status.code().unwrap_or(-1), stderr);
+    }
+
+    let _ = window.emit("deploy:log", "npm 依赖安装完成");
+    Ok(())
+}
+
+/// 在部署的 node 中定位自带的 npm-cli.js
+fn find_npm_cli(node_bin: &PathBuf) -> Result<PathBuf> {
+    let node_dir = node_bin.parent().unwrap_or(node_bin.as_path());
+
+    // Linux/macOS: node 旁边的 ../lib/node_modules/npm/bin/npm-cli.js
+    // Windows: 可能在 node_modules/npm/bin/npm-cli.js
+    let candidates = [
+        node_dir.join("../lib/node_modules/npm/bin/npm-cli.js"),
+        node_dir.join("node_modules/npm/bin/npm-cli.js"),
+    ];
+
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.canonicalize()?);
+        }
+    }
+
+    // 回退：让 node 自己找
+    let output = std::process::Command::new(node_bin)
+        .args(["-e", "console.log(require.resolve('npm/bin/npm-cli.js'))"])
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let cli = PathBuf::from(&path);
+            if cli.exists() {
+                return Ok(cli);
+            }
+        }
+    }
+
+    anyhow::bail!("未找到 npm，Node.js 安装可能不完整")
 }
 
 fn write_main_config(config: &DeployConfig) -> Result<()> {
@@ -310,17 +405,16 @@ fn write_main_config(config: &DeployConfig) -> Result<()> {
         .join(".openclaw");
     std::fs::create_dir_all(&config_dir)?;
 
-    let password_hash = bcrypt::hash(
-        config.admin_password.expose_secret(), bcrypt::DEFAULT_COST)?;
-
+    // openclaw 2026.x 配置格式：gateway.mode + gateway.auth.password（明文）
     let mut gateway = serde_json::json!({
         "port": config.service_port,
+        "mode": "local",
         "auth": {
-            "mode": "password",
-            "passwordHash": password_hash
+            "password": config.admin_password.expose_secret()
         }
     });
     if let Some(domain) = &config.domain_name {
+        gateway["mode"] = serde_json::json!("public");
         gateway["publicUrl"] = serde_json::json!(format!("https://{}", domain));
     }
 
@@ -345,9 +439,7 @@ fn write_main_config(config: &DeployConfig) -> Result<()> {
 }
 
 fn install_service(config: &DeployConfig) -> Result<()> {
-    let node_bin = PathBuf::from(&config.install_path)
-        .join("node")
-        .join(if cfg!(windows) { "node.exe" } else { "node" });
+    let node_bin = node_bin_path(&config.install_path);
     // npm tarball 解压后入口在 openclaw_pkg/package/openclaw.mjs
     let script = PathBuf::from(&config.install_path)
         .join("openclaw_pkg")
@@ -656,7 +748,8 @@ fn write_deploy_meta(config: &DeployConfig) -> Result<()> {
 
 // ── 网络下载辅助（Online 模式）────────────────────────────────────
 
-async fn download_node_binary(dest: &PathBuf, proxy: Option<&str>, window: &Window) -> Result<()> {
+/// 下载完整 Node.js 发行版并解压到 node_dir（包含 bin/node + lib/node_modules/npm/）
+async fn download_node_full(node_dir: &PathBuf, proxy: Option<&str>, window: &Window) -> Result<()> {
     let version = "22.17.0";
     #[cfg(target_os = "linux")]
     let url = format!("https://nodejs.org/dist/v{}/node-v{}-linux-x64.tar.xz", version, version);
@@ -667,21 +760,19 @@ async fn download_node_binary(dest: &PathBuf, proxy: Option<&str>, window: &Wind
     #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
     let url = format!("https://nodejs.org/dist/v{}/node-v{}-darwin-x64.tar.gz", version, version);
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-    let url = { let _ = (dest, proxy, window); anyhow::bail!("当前平台不支持在线下载 Node.js") };
+    { let _ = (node_dir, proxy, window); anyhow::bail!("当前平台不支持在线下载 Node.js"); }
 
-    let archive_tmp = dest.with_file_name("node_archive.tmp");
+    let archive_tmp = node_dir.join("node_archive.tmp");
     download_with_progress(&url, &archive_tmp, proxy, "Node.js", window).await?;
-    extract_node_from_archive(&archive_tmp, dest)?;
+
+    let _ = window.emit("deploy:log", "解压 Node.js 完整发行版（含 npm）…");
+    extract_node_full(&archive_tmp, node_dir)?;
     std::fs::remove_file(&archive_tmp).ok();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
-    }
     Ok(())
 }
 
-fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
+/// 解压完整 Node.js 发行版到 node_dir，strip 顶层目录
+fn extract_node_full(archive: &PathBuf, node_dir: &PathBuf) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         let data = std::fs::read(archive)?;
@@ -690,12 +781,25 @@ fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
         for entry in tar.entries()? {
             let mut e = entry?;
             let path = e.path()?.into_owned();
-            if path.ends_with("bin/node") {
-                e.unpack(dest)?;
-                return Ok(());
+            // strip 顶层 "node-v22.17.0-linux-x64/" 前缀
+            let stripped = path.components().skip(1).collect::<PathBuf>();
+            if stripped.as_os_str().is_empty() { continue; }
+            let dest = node_dir.join(&stripped);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            e.unpack(&dest)?;
+        }
+        // 确保 node 可执行
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let node_bin = node_dir.join("bin/node");
+            if node_bin.exists() {
+                std::fs::set_permissions(&node_bin, std::fs::Permissions::from_mode(0o755))?;
             }
         }
-        anyhow::bail!("Node.js 压缩包中未找到 bin/node");
+        return Ok(());
     }
     #[cfg(target_os = "windows")]
     {
@@ -704,32 +808,50 @@ fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
         let mut zip = zip::ZipArchive::new(cursor)?;
         for i in 0..zip.len() {
             let mut file = zip.by_index(i)?;
-            if file.name().ends_with("node.exe") {
-                let mut out = std::fs::File::create(dest)?;
+            let path = PathBuf::from(file.name());
+            let stripped = path.components().skip(1).collect::<PathBuf>();
+            if stripped.as_os_str().is_empty() { continue; }
+            let dest = node_dir.join(&stripped);
+            if file.is_dir() {
+                std::fs::create_dir_all(&dest)?;
+            } else {
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let mut out = std::fs::File::create(&dest)?;
                 std::io::copy(&mut file, &mut out)?;
-                return Ok(());
             }
         }
-        anyhow::bail!("Node.js 压缩包中未找到 node.exe");
+        return Ok(());
     }
     #[cfg(target_os = "macos")]
     {
-        // macOS 发行版为 .tar.gz
         let file = std::fs::File::open(archive)?;
         let gz = flate2::read::GzDecoder::new(file);
         let mut tar = tar::Archive::new(gz);
         for entry in tar.entries()? {
             let mut e = entry?;
             let path = e.path()?.into_owned();
-            if path.ends_with("bin/node") {
-                e.unpack(dest)?;
-                return Ok(());
+            let stripped = path.components().skip(1).collect::<PathBuf>();
+            if stripped.as_os_str().is_empty() { continue; }
+            let dest = node_dir.join(&stripped);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            e.unpack(&dest)?;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let node_bin = node_dir.join("bin/node");
+            if node_bin.exists() {
+                std::fs::set_permissions(&node_bin, std::fs::Permissions::from_mode(0o755))?;
             }
         }
-        anyhow::bail!("Node.js 压缩包中未找到 bin/node");
+        return Ok(());
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-    anyhow::bail!("当前平台不支持自动提取 Node.js 二进制");
+    anyhow::bail!("当前平台不支持");
 }
 
 async fn download_openclaw_package(dest: &PathBuf, proxy: Option<&str>, window: &Window) -> Result<()> {

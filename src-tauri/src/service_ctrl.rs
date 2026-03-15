@@ -46,9 +46,7 @@ pub async fn check_status(port: u16) -> ServiceStatus {
 // ── 启动服务 ──────────────────────────────────────────────────────────────────
 
 pub fn start(meta: &DeployMeta) -> Result<()> {
-    let node_bin = PathBuf::from(&meta.install_path)
-        .join("node")
-        .join(if cfg!(windows) { "node.exe" } else { "node" });
+    let node_bin = crate::deploy::node_bin_path(&meta.install_path);
     // npm tarball 解压后入口在 openclaw_pkg/package/openclaw.mjs
     let script = PathBuf::from(&meta.install_path)
         .join("openclaw_pkg")

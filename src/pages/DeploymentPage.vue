@@ -67,24 +67,19 @@ const { subscribe } = useDeployEvents(
 );
 
 onMounted(async () => {
-  console.log("[deploy-page] onMounted: subscribing events...");
   await subscribe();
-  console.log("[deploy-page] subscribe done");
   wizard.setDeployStatus("running");
   const dto = {
     ...config.toDto(),
     source_mode: buildSourceMode(),
   };
-  console.log("[deploy-page] calling startDeploy, dto:", JSON.stringify(dto));
   try {
     await tauri.startDeploy(dto);
-    console.log("[deploy-page] startDeploy returned OK");
     wizard.setDeployStatus("done");
     tauri.clashStop().catch(() => {});
     goTo("finish");
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("[deploy-page] startDeploy FAILED:", msg);
     wizard.setDeployStatus("failed");
     errorReason.value = msg;
     tauri.clashStop().catch(() => {});
