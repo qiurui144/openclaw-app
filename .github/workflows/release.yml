@@ -274,13 +274,12 @@ jobs:
             echo "使用默认 RSA 公钥"
           fi
 
-      - name: 构建 Lite DMG
-        run: npm run tauri build -- --target ${{ matrix.target }} --bundles dmg
+      - name: 构建 Lite
+        run: npm run tauri build -- --target ${{ matrix.target }}
         env:
           OC_BUILD_BUNDLED: "0"
           OC_CLIENT_ID: ${{ matrix.client.id }}
           OC_LICENSE_API: ${{ matrix.client.license_api }}
-          # 跳过签名（无开发者账号）
           APPLE_SIGNING_IDENTITY: "-"
 
       - name: 暂存 Lite DMG
@@ -303,8 +302,8 @@ jobs:
           RESOURCES_DIR: resources/binaries
           MACOS_NODE_ARCH: ${{ matrix.arch }}
 
-      - name: 构建 Full Bundle DMG
-        run: npm run tauri build -- --target ${{ matrix.target }} --bundles dmg --features bundled
+      - name: 构建 Full Bundle
+        run: npm run tauri build -- --target ${{ matrix.target }} --features bundled
         env:
           OC_BUILD_BUNDLED: "1"
           OC_CLIENT_ID: ${{ matrix.client.id }}
