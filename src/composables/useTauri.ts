@@ -6,7 +6,7 @@ import type { CheckItem, DeployProgress } from "@/stores/wizard";
 export interface UpdateInfo {
   version: string;
   download_url: string;
-  sha256: string;
+  sha256: string | null;
   release_notes: string;
 }
 
@@ -54,8 +54,8 @@ export const tauri = {
     invoke<void>("update_skills", { installPath, skillNames, proxyUrl: proxyUrl ?? null }),
   checkUpdate: (proxyUrl?: string) =>
     invoke<UpdateInfo | null>("check_openclaw_update", { proxyUrl: proxyUrl ?? null }),
-  applyUpdate: (installPath: string, downloadUrl: string, sha256: string, proxyUrl?: string) =>
-    invoke<void>("apply_openclaw_update", { installPath, downloadUrl, sha256, proxyUrl: proxyUrl ?? null }),
+  applyUpdate: (installPath: string, downloadUrl: string, sha256?: string | null, proxyUrl?: string) =>
+    invoke<void>("apply_openclaw_update", { installPath, downloadUrl, sha256: sha256 ?? null, proxyUrl: proxyUrl ?? null }),
   readDeployMeta: () => invoke<DeployMeta | null>("read_deploy_meta"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   getDefaultInstallPath: () => invoke<string>("get_default_install_path"),

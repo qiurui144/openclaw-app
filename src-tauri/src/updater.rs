@@ -154,9 +154,11 @@ pub async fn apply_update(
             let _ = window.emit("update:progress", "启动失败，正在回滚…");
             std::fs::remove_dir_all(&pkg_dir).ok();
             if backup_dir.exists() {
-                std::fs::rename(&backup_dir, &pkg_dir)?;
+                // rename 失败不 propagate，避免吞掉原始错误
+                if let Err(re) = std::fs::rename(&backup_dir, &pkg_dir) {
+                    eprintln!("[updater] 回滚 rename 失败: {re}");
+                }
             }
-            // S7 fix: 回滚启动不 propagate 错误
             let _ = start_service();
             anyhow::bail!("更新失败，已回滚到旧版本: {}", e);
         }

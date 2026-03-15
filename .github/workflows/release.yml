@@ -284,6 +284,7 @@ jobs:
 
       - name: 暂存 Lite DMG
         run: |
+          shopt -s failglob
           CLIENT_ID="${{ matrix.client.id }}"
           SUFFIX=""
           if [ "$CLIENT_ID" != "default" ]; then SUFFIX="-${CLIENT_ID}"; fi
@@ -312,6 +313,7 @@ jobs:
 
       - name: 暂存 Full Bundle DMG
         run: |
+          shopt -s failglob
           CLIENT_ID="${{ matrix.client.id }}"
           SUFFIX=""
           if [ "$CLIENT_ID" != "default" ]; then SUFFIX="-${CLIENT_ID}"; fi

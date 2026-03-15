@@ -580,7 +580,7 @@ fn start_service(config: &DeployConfig) -> Result<()> {
 
         // 直接启动进程（未选 systemd 或 systemctl 失败时）
         std::process::Command::new(&node_bin)
-            .args([script.to_str().unwrap(), "gateway",
+            .args([&script.to_string_lossy(), "gateway",
                    "--port", &config.service_port.to_string()])
             .env("NODE_ENV", "production")
             .spawn()
@@ -595,7 +595,7 @@ fn start_service(config: &DeployConfig) -> Result<()> {
             if ran { return Ok(()); }
         }
         std::process::Command::new(&node_bin)
-            .args([script.to_str().unwrap(), "gateway",
+            .args([&script.to_string_lossy(), "gateway",
                    "--port", &config.service_port.to_string()])
             .env("NODE_ENV", "production")
             .spawn()
@@ -620,7 +620,7 @@ fn start_service(config: &DeployConfig) -> Result<()> {
 
         // 直接启动进程（未选 launchd 或 launchctl 失败时）
         std::process::Command::new(&node_bin)
-            .args([script.to_str().unwrap(), "gateway",
+            .args([&script.to_string_lossy(), "gateway",
                    "--port", &config.service_port.to_string()])
             .env("NODE_ENV", "production")
             .spawn()
