@@ -214,6 +214,7 @@ jobs:
 
       - name: 暂存 Lite DMG
         run: |
+          shopt -s failglob
           mkdir -p _artifacts/macos
           for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
             cp "$f" "_artifacts/macos/$(basename ${f%.dmg})-${{ matrix.arch }}-lite.dmg"
@@ -238,6 +239,7 @@ jobs:
 
       - name: 暂存 Full Bundle DMG
         run: |
+          shopt -s failglob
           for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
             cp "$f" "_artifacts/macos/$(basename ${f%.dmg})-${{ matrix.arch }}-full.dmg"
           done

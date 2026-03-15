@@ -21,7 +21,7 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("openclaw-tray")
         .tooltip("OpenClaw 部署向导")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(app.default_window_icon().expect("应用图标未配置，请检查 tauri.conf.json 中的 icon 设置").clone())
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {

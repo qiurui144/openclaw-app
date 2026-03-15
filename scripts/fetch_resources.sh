@@ -13,6 +13,11 @@
 # 在线模式（Online）会下载完整 Node.js 发行版（含 npm）并在线 npm install。
 set -euo pipefail
 
+# 跨平台文件大小获取（Linux: stat -c%s, macOS: stat -f%z）
+file_size() {
+  stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo 0
+}
+
 NODE_VERSION="${NODE_VERSION:-22.17.0}"
 OPENCLAW_PKG="${OPENCLAW_PKG:-openclaw}"
 RESOURCES_DIR="${RESOURCES_DIR:-resources/binaries}"
@@ -21,7 +26,7 @@ NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 mkdir -p "$RESOURCES_DIR/linux" "$RESOURCES_DIR/windows" "$RESOURCES_DIR/macos"
 
 # ── Node.js（单独二进制，离线模式只需要 node 本身）───────────
-if [[ ! -f "$RESOURCES_DIR/linux/node" ]] || [[ $(stat -c%s "$RESOURCES_DIR/linux/node" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+if [[ ! -f "$RESOURCES_DIR/linux/node" ]] || [[ $(file_size "$RESOURCES_DIR/linux/node") -lt 1000000 ]]; then
   echo "下载 Linux Node.js ${NODE_VERSION}..."
   curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
     | tar -xJ --strip-components=2 -C "$RESOURCES_DIR/linux" "node-v${NODE_VERSION}-linux-x64/bin/node"
@@ -31,7 +36,7 @@ else
 fi
 
 MACOS_NODE_ARCH="${MACOS_NODE_ARCH:-arm64}"
-if [[ ! -f "$RESOURCES_DIR/macos/node" ]] || [[ $(stat -c%s "$RESOURCES_DIR/macos/node" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+if [[ ! -f "$RESOURCES_DIR/macos/node" ]] || [[ $(file_size "$RESOURCES_DIR/macos/node") -lt 1000000 ]]; then
   NODE_ARCH_SUFFIX="$MACOS_NODE_ARCH"
   if [[ "$MACOS_NODE_ARCH" == "x86_64" ]]; then NODE_ARCH_SUFFIX="x64"; fi
   echo "下载 macOS Node.js ${NODE_VERSION} (${MACOS_NODE_ARCH})..."
@@ -42,7 +47,7 @@ else
   echo "macOS Node.js 已存在（$(du -sh "$RESOURCES_DIR/macos/node" | cut -f1)），跳过"
 fi
 
-if [[ ! -f "$RESOURCES_DIR/windows/node.exe" ]] || [[ $(stat -c%s "$RESOURCES_DIR/windows/node.exe" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+if [[ ! -f "$RESOURCES_DIR/windows/node.exe" ]] || [[ $(file_size "$RESOURCES_DIR/windows/node.exe") -lt 1000000 ]]; then
   echo "下载 Windows Node.js ${NODE_VERSION}..."
   curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip" \
     -o /tmp/node_win.zip
@@ -65,7 +70,7 @@ if [[ "${1:-}" != "--node-only" ]]; then
     { echo "错误：无法获取下载地址" >&2; exit 1; }
 
   NEEDS_BUILD=0
-  if [[ ! -f "$RESOURCES_DIR/linux/openclaw.tgz" ]] || [[ $(stat -c%s "$RESOURCES_DIR/linux/openclaw.tgz" 2>/dev/null || echo 0) -lt 1000 ]]; then
+  if [[ ! -f "$RESOURCES_DIR/linux/openclaw.tgz" ]] || [[ $(file_size "$RESOURCES_DIR/linux/openclaw.tgz") -lt 1000 ]]; then
     NEEDS_BUILD=1
   fi
 
@@ -106,7 +111,7 @@ fi
 MIHOMO_VERSION="${MIHOMO_VERSION:-1.18.7}"
 MIHOMO_BASE_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}"
 
-if [[ ! -f "$RESOURCES_DIR/linux/mihomo" ]] || [[ $(stat -c%s "$RESOURCES_DIR/linux/mihomo" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+if [[ ! -f "$RESOURCES_DIR/linux/mihomo" ]] || [[ $(file_size "$RESOURCES_DIR/linux/mihomo") -lt 1000000 ]]; then
   echo "下载 Linux Mihomo ${MIHOMO_VERSION}..."
   curl -fsSL "${MIHOMO_BASE_URL}/mihomo-linux-amd64-v${MIHOMO_VERSION}.gz" -o /tmp/mihomo_linux.gz
   gunzip -f /tmp/mihomo_linux.gz
@@ -116,7 +121,7 @@ else
   echo "Linux Mihomo 已存在，跳过"
 fi
 
-if [[ ! -f "$RESOURCES_DIR/windows/mihomo.exe" ]] || [[ $(stat -c%s "$RESOURCES_DIR/windows/mihomo.exe" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+if [[ ! -f "$RESOURCES_DIR/windows/mihomo.exe" ]] || [[ $(file_size "$RESOURCES_DIR/windows/mihomo.exe") -lt 1000000 ]]; then
   echo "下载 Windows Mihomo ${MIHOMO_VERSION}..."
   curl -fsSL "${MIHOMO_BASE_URL}/mihomo-windows-amd64-v${MIHOMO_VERSION}.zip" -o /tmp/mihomo_win.zip
   INNER_WIN_EXE=$(unzip -Z1 /tmp/mihomo_win.zip | grep -i '\.exe$' | head -1) || INNER_WIN_EXE=""
@@ -132,7 +137,7 @@ fi
 
 MACOS_MIHOMO_ARCH="${MACOS_NODE_ARCH:-arm64}"
 if [[ "$MACOS_MIHOMO_ARCH" == "x86_64" ]]; then MACOS_MIHOMO_ARCH="amd64"; fi
-if [[ ! -f "$RESOURCES_DIR/macos/mihomo" ]] || [[ $(stat -c%s "$RESOURCES_DIR/macos/mihomo" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+if [[ ! -f "$RESOURCES_DIR/macos/mihomo" ]] || [[ $(file_size "$RESOURCES_DIR/macos/mihomo") -lt 1000000 ]]; then
   echo "下载 macOS Mihomo ${MIHOMO_VERSION} (${MACOS_MIHOMO_ARCH})..."
   curl -fsSL "${MIHOMO_BASE_URL}/mihomo-darwin-${MACOS_MIHOMO_ARCH}-v${MIHOMO_VERSION}.gz" -o /tmp/mihomo_mac.gz
   gunzip -f /tmp/mihomo_mac.gz

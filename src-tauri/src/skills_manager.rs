@@ -110,9 +110,15 @@ pub async fn update_skill(
     if target.exists() {
         std::fs::rename(&target, &backup)?;
     }
-    std::fs::rename(&extracted, &target)?;
+    if let Err(e) = std::fs::rename(&extracted, &target) {
+        // rename 失败时回滚 backup
+        if backup.exists() {
+            std::fs::rename(&backup, &target).ok();
+        }
+        return Err(e.into());
+    }
     if backup.exists() {
-        std::fs::remove_dir_all(&backup)?;
+        std::fs::remove_dir_all(&backup).ok();
     }
 
     std::fs::remove_dir_all(&tmp_dir).ok();
