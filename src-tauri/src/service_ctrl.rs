@@ -49,10 +49,10 @@ pub fn start(meta: &DeployMeta) -> Result<()> {
     let node_bin = PathBuf::from(&meta.install_path)
         .join("node")
         .join(if cfg!(windows) { "node.exe" } else { "node" });
+    // npm tarball 解压后入口在 openclaw_pkg/package/openclaw.mjs
     let script = PathBuf::from(&meta.install_path)
         .join("openclaw_pkg")
-        .join("node_modules")
-        .join("openclaw")
+        .join("package")
         .join("openclaw.mjs");
 
     #[cfg(target_os = "linux")]

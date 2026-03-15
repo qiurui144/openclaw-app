@@ -35,11 +35,11 @@ pub struct AiConfigDto {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum SourceModeDto {
     Bundled,
     Online { proxy_url: Option<String> },
-    LocalZip { path: String },
+    LocalZip { zip_path: String },
 }
 
 // ── 内部安全类型：admin_password 使用 Secret<String> ─────────────
@@ -78,8 +78,8 @@ impl From<DeployConfigDto> for DeployConfig {
                 SourceModeDto::Bundled => SourceMode::Bundled,
                 SourceModeDto::Online { proxy_url } =>
                     SourceMode::Online { proxy_url },
-                SourceModeDto::LocalZip { path } =>
-                    SourceMode::LocalZip(PathBuf::from(path)),
+                SourceModeDto::LocalZip { zip_path } =>
+                    SourceMode::LocalZip(PathBuf::from(zip_path)),
             },
             wecom_config: dto.wecom_config,
             dingtalk_config: dto.dingtalk_config,
@@ -126,7 +126,22 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
 
     // Step 1: 创建安装目录
     emit_progress(window, 1, TOTAL, "创建安装目录…");
+    let _ = window.emit("deploy:log", format!("安装路径: {}", config.install_path));
     std::fs::create_dir_all(&config.install_path)?;
+    let _ = window.emit("deploy:log", "目录创建完成");
+
+    // Online 模式预检：自动探测网络环境
+    if let SourceMode::Online { ref proxy_url } = config.source_mode {
+        let _ = window.emit("deploy:log", "检测网络连通性…");
+        let probe_ok = probe_connectivity(proxy_url.as_deref()).await;
+        if probe_ok {
+            let _ = window.emit("deploy:log", "网络连通，开始下载资源");
+        } else if proxy_url.is_some() {
+            let _ = window.emit("deploy:log", "⚠ 通过代理仍无法连通，下载可能失败");
+        } else {
+            let _ = window.emit("deploy:log", "⚠ 无法直连 npm/nodejs.org，如需代理请返回配置 Clash");
+        }
+    }
 
     // Step 2-4: 获取并解包资源（因 SourceMode 不同行为差异）
     emit_progress(window, 2, TOTAL, "获取 Node.js 运行时…");
@@ -141,6 +156,7 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     // Step 5: 写入主配置
     emit_progress(window, 5, TOTAL, "写入配置文件…");
     write_main_config(config)?;
+    let _ = window.emit("deploy:log", format!("配置写入 ~/.openclaw/openclaw.json（端口 {}）", config.service_port));
 
     // Step 6: 写入平台集成配置
     emit_progress(window, 6, TOTAL, "写入平台集成配置…");
@@ -157,6 +173,7 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     // Step 7: 注册系统服务（失败不阻断部署，仅记录警告）
     if config.install_service {
         emit_progress(window, 7, TOTAL, "注册系统服务…");
+        let _ = window.emit("deploy:log", "尝试注册 systemd/launchd/schtasks 服务…");
         if let Err(e) = install_service(config) {
             let _ = window.emit("deploy:progress", DeployProgress {
                 step: 7, total: TOTAL, percent: 63,
@@ -167,6 +184,9 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
 
     // Step 8: 启动服务
     emit_progress(window, 8, TOTAL, "启动 OpenClaw 服务…");
+    let _ = window.emit("deploy:log", format!("启动 node {} gateway --port {}",
+        PathBuf::from(&config.install_path).join("openclaw_pkg/package/openclaw.mjs").display(),
+        config.service_port));
     start_service(config)?;
 
     // Step 9: 健康检查（每 2 秒更新进度）
@@ -333,10 +353,10 @@ fn install_service(config: &DeployConfig) -> Result<()> {
     let node_bin = PathBuf::from(&config.install_path)
         .join("node")
         .join(if cfg!(windows) { "node.exe" } else { "node" });
+    // npm tarball 解压后入口在 openclaw_pkg/package/openclaw.mjs
     let script = PathBuf::from(&config.install_path)
         .join("openclaw_pkg")
-        .join("node_modules")
-        .join("openclaw")
+        .join("package")
         .join("openclaw.mjs");
     let port = config.service_port;
     let elevated = crate::system_check::is_elevated();
@@ -427,9 +447,16 @@ fn install_service(config: &DeployConfig) -> Result<()> {
 fn start_service(config: &DeployConfig) -> Result<()> {
     let node_bin = PathBuf::from(&config.install_path)
         .join("node").join(if cfg!(windows) { "node.exe" } else { "node" });
+    // npm tarball 解压后入口在 openclaw_pkg/package/openclaw.mjs
     let script = PathBuf::from(&config.install_path)
-        .join("openclaw_pkg").join("node_modules")
-        .join("openclaw").join("openclaw.mjs");
+        .join("openclaw_pkg").join("package").join("openclaw.mjs");
+
+    if !node_bin.exists() {
+        anyhow::bail!("Node.js 不存在: {}，解压步骤可能失败", node_bin.display());
+    }
+    if !script.exists() {
+        anyhow::bail!("入口脚本不存在: {}，解压步骤可能失败", script.display());
+    }
 
     #[cfg(target_os = "linux")]
     {
@@ -711,8 +738,36 @@ fn extract_node_from_archive(archive: &PathBuf, dest: &PathBuf) -> Result<()> {
 }
 
 async fn download_openclaw_package(dest: &PathBuf, proxy: Option<&str>, window: &Window) -> Result<()> {
-    let url = "https://github.com/openclaw/openclaw/releases/latest/download/openclaw.tgz";
-    download_with_progress(url, dest, proxy, "OpenClaw", window).await
+    // 从 npm registry 查询最新版本的 tarball 地址（npmmirror 优先，回退 npmjs）
+    let tarball_url = fetch_npm_tarball_url("openclaw", proxy).await?;
+    download_with_progress(&tarball_url, dest, proxy, "OpenClaw", window).await
+}
+
+async fn fetch_npm_tarball_url(pkg: &str, proxy: Option<&str>) -> Result<String> {
+    let registries = [
+        format!("https://registry.npmmirror.com/{}/latest", pkg),
+        format!("https://registry.npmjs.org/{}/latest", pkg),
+    ];
+    let mut last_err = anyhow::anyhow!("所有 npm 镜像均不可达");
+    for url in &registries {
+        let client = build_client(proxy)?;
+        match client.get(url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                let info: serde_json::Value = resp.json().await?;
+                let tarball = info["dist"]["tarball"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("npm registry 响应缺少 dist.tarball 字段"))?
+                    .to_string();
+                return Ok(tarball);
+            }
+            Ok(resp) => {
+                last_err = anyhow::anyhow!("npm registry {} 返回 {}", url, resp.status());
+            }
+            Err(e) => {
+                last_err = anyhow::anyhow!("连接 npm registry {} 失败: {}", url, e);
+            }
+        }
+    }
+    Err(last_err)
 }
 
 /// 流式下载并实时向前端发送下载进度（每 512KB 一条日志）
@@ -722,6 +777,9 @@ async fn download_with_progress(
     use std::io::Write;
     let client = build_client(proxy)?;
     let resp = client.get(url).send().await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("下载 {} 失败，HTTP {}: {}", label, resp.status(), url);
+    }
     let total = resp.content_length().unwrap_or(0);
     let mut downloaded: u64 = 0;
     let mut last_logged: u64 = 0;
@@ -756,6 +814,22 @@ fn build_client(proxy: Option<&str>) -> Result<reqwest::Client> {
         builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
     }
     Ok(builder.build()?)
+}
+
+/// 探测 npm registry 和 nodejs.org 连通性（3 秒超时，不阻塞部署）
+async fn probe_connectivity(proxy: Option<&str>) -> bool {
+    let client = match build_client(proxy) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let probe = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or(client);
+    probe.head("https://registry.npmmirror.com/openclaw")
+        .send().await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 fn extract_from_zip(zip_path: &PathBuf, entry_name: &str, dest: &PathBuf) -> Result<()> {
@@ -823,7 +897,7 @@ mod tests {
             install_service: false,
             start_on_boot: false,
             source_mode: SourceModeDto::LocalZip {
-                path: "/tmp/openclaw.zip".into()
+                zip_path: "/tmp/openclaw.zip".into()
             },
             wecom_config: None,
             dingtalk_config: None,
@@ -833,5 +907,30 @@ mod tests {
         };
         let config = DeployConfig::from(dto);
         assert!(matches!(config.source_mode, SourceMode::LocalZip(_)));
+    }
+
+    /// 验证前端真实发出的 JSON 格式能被正确反序列化。
+    /// 这些 JSON 字符串与前端 buildSourceMode() 的输出完全一致。
+    #[test]
+    fn test_source_mode_json_deserialization() {
+        // bundled 模式
+        let v: SourceModeDto = serde_json::from_str(r#"{"type":"bundled"}"#).unwrap();
+        assert!(matches!(v, SourceModeDto::Bundled));
+
+        // online 模式（无代理）
+        let v: SourceModeDto = serde_json::from_str(r#"{"type":"online","proxy_url":null}"#).unwrap();
+        assert!(matches!(v, SourceModeDto::Online { proxy_url: None }));
+
+        // online 模式（带代理）
+        let v: SourceModeDto = serde_json::from_str(
+            r#"{"type":"online","proxy_url":"http://127.0.0.1:7890"}"#
+        ).unwrap();
+        assert!(matches!(v, SourceModeDto::Online { proxy_url: Some(_) }));
+
+        // local_zip 模式
+        let v: SourceModeDto = serde_json::from_str(
+            r#"{"type":"local_zip","zip_path":"/tmp/openclaw.zip"}"#
+        ).unwrap();
+        assert!(matches!(v, SourceModeDto::LocalZip { .. }));
     }
 }

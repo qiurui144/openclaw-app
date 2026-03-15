@@ -43,6 +43,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import WizardLayout from "@/components/WizardLayout.vue";
 import { useWizardStore } from "@/stores/wizard";
 import { useConfigStore } from "@/stores/config";
@@ -66,17 +67,16 @@ onMounted(() => {
 });
 
 async function pickZip() {
-  // 简化实现：在真实 Tauri 环境中通过 dialog plugin 选择文件
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".zip";
-  input.onchange = () => {
-    if (input.files?.[0]) {
-      config.localZipPath = input.files[0].name;
-      wizard.setReady(true);
-    }
-  };
-  input.click();
+  const path = await open({
+    title: "选择本地安装包",
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+    multiple: false,
+    directory: false,
+  });
+  if (typeof path === "string") {
+    config.localZipPath = path;
+    wizard.setReady(true);
+  }
 }
 
 function handleNext() {

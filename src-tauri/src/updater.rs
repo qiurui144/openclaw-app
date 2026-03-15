@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Clone)]
@@ -8,19 +8,6 @@ pub struct UpdateInfo {
     pub download_url: String,
     pub release_notes: String,
     pub sha256: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    body: Option<String>,
-    assets: Vec<GithubAsset>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GithubAsset {
-    name: String,
-    browser_download_url: String,
 }
 
 /// 比较版本号，返回 server > local
@@ -39,8 +26,12 @@ pub fn is_newer(server: &str, local: &str) -> bool {
 
 pub async fn check_update(proxy_url: Option<&str>) -> Result<Option<UpdateInfo>> {
     let current = env!("CARGO_PKG_VERSION");
-    let url = "https://api.github.com/repos/openclaw/openclaw/releases/latest";
 
+    // 优先从 npm registry 检查（更可靠，中国用户可直连 npmmirror）
+    let registries = [
+        "https://registry.npmmirror.com/openclaw/latest",
+        "https://registry.npmjs.org/openclaw/latest",
+    ];
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .user_agent("openclaw-wizard");
@@ -48,22 +39,35 @@ pub async fn check_update(proxy_url: Option<&str>) -> Result<Option<UpdateInfo>>
         builder = builder.proxy(reqwest::Proxy::all(proxy)?);
     }
     let client = builder.build()?;
-    let release: GithubRelease = client.get(url).send().await?.json().await?;
 
-    if !is_newer(&release.tag_name, current) {
-        return Ok(None);
+    let mut last_err = anyhow::anyhow!("所有 npm 镜像均不可达");
+    for url in &registries {
+        match client.get(*url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                let info: serde_json::Value = resp.json().await?;
+                let version = info["version"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("npm 响应缺少 version 字段"))?;
+                if !is_newer(version, current) {
+                    return Ok(None);
+                }
+                let tarball = info["dist"]["tarball"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("npm 响应缺少 dist.tarball 字段"))?;
+                return Ok(Some(UpdateInfo {
+                    version: version.to_string(),
+                    download_url: tarball.to_string(),
+                    release_notes: String::new(),
+                    sha256: None,
+                }));
+            }
+            Ok(resp) => {
+                last_err = anyhow::anyhow!("npm registry {} 返回 {}", url, resp.status());
+            }
+            Err(e) => {
+                last_err = anyhow::anyhow!("连接 {} 失败: {}", url, e);
+            }
+        }
     }
-
-    let asset = release.assets.iter()
-        .find(|a| a.name == "openclaw.tgz")
-        .ok_or_else(|| anyhow::anyhow!("Release 中未找到 openclaw.tgz"))?;
-
-    Ok(Some(UpdateInfo {
-        version: release.tag_name,
-        download_url: asset.browser_download_url.clone(),
-        release_notes: release.body.unwrap_or_default(),
-        sha256: None,
-    }))
+    Err(last_err)
 }
 
 pub async fn apply_update(
@@ -163,27 +167,14 @@ pub async fn apply_update(
 }
 
 fn stop_service() -> Result<()> {
-    #[cfg(target_os = "linux")]
-    std::process::Command::new("systemctl")
-        .args(["--user", "stop", "openclaw.service"])
-        .status()?;
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("schtasks")
-        .args(["/End", "/TN", "OpenClaw Gateway"])
-        .status()?;
-    Ok(())
+    // 委托 service_ctrl：覆盖 root/user systemd、launchd、schtasks、pkill 回退
+    crate::service_ctrl::stop()
 }
 
 fn start_service() -> Result<()> {
-    #[cfg(target_os = "linux")]
-    std::process::Command::new("systemctl")
-        .args(["--user", "start", "openclaw.service"])
-        .status()?;
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("schtasks")
-        .args(["/Run", "/TN", "OpenClaw Gateway"])
-        .status()?;
-    Ok(())
+    let meta = crate::service_ctrl::read_meta()
+        .ok_or_else(|| anyhow::anyhow!("未找到安装记录，无法启动服务"))?;
+    crate::service_ctrl::start(&meta)
 }
 
 #[cfg(test)]

@@ -129,6 +129,7 @@ async function applyUpdate() {
       wizard.existingPath,
       updateInfo.value.download_url,
       updateInfo.value.sha256,
+      undefined, // proxyUrl：后续可从 Clash 配置读取
     );
     applyPercent.value = 100;
     done.value = true;

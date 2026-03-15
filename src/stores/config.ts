@@ -40,7 +40,7 @@ export interface DeployConfigDto {
   domain_name: string | null;
   install_service: boolean;
   start_on_boot: boolean;
-  source_mode: { type: string; proxy_url?: string; path?: string };
+  source_mode: { type: string; proxy_url?: string | null; zip_path?: string | null };
   wecom_config: WecomConfigDto | null;
   dingtalk_config: DingtalkConfigDto | null;
   feishu_config: FeishuConfigDto | null;
