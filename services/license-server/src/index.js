@@ -2,6 +2,7 @@ import Koa from "koa";
 import bodyParser from "koa-bodyparser";
 import Router from "koa-router";
 import { initDb, getDb } from "./db.js";
+import { initKeyStore } from "./keymanager.js";
 import { authRoutes } from "./routes/auth.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { paymentsRoutes } from "./routes/payments.js";
@@ -12,8 +13,9 @@ import { ratelimit } from "./middleware/ratelimit.js";
 const app = new Koa();
 const router = new Router({ prefix: "/api" });
 
-// 初始化数据库
+// 初始化数据库 + 密钥存储
 initDb();
+initKeyStore();
 
 // 中间件
 app.use(ratelimit());

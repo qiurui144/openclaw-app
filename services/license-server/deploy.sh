@@ -69,8 +69,8 @@ PRIVATE_KEY_PATH=${KEYS_DIR}/license_priv.pem
 PUBLIC_KEY_PATH=${KEYS_DIR}/license_pub.pem
 DB_PATH=${DEPLOY_DIR}/data/license.db
 
-# 付费 Skill 加密密钥（务必修改为随机值）
-SKILL_ENCRYPTION_SECRET=$(openssl rand -hex 32)
+# 主密钥加密密钥（KEK，保护数据库中的授权密钥）
+KEY_ENCRYPTION_KEY=$(openssl rand -hex 32)
 
 # 微信公众号配置（部署后通过 API 或直接编辑数据库配置）
 # WECHAT_APPID=

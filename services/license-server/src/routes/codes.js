@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "crypto";
 import { getDb } from "../db.js";
 import { signToken, verifyToken } from "../jwt.js";
+import { generateMasterKey, revokeMasterKey } from "../keymanager.js";
 
 /**
  * 生成授权码格式：OC-XXXX-XXXX-XXXX（大写字母+数字）
@@ -173,70 +174,93 @@ export function codesRoutes(router) {
     }
 
     const db = getDb();
+    const normalizedCode = code.toUpperCase().trim();
 
     // 查找授权码
     const codeInfo = db.prepare("SELECT * FROM activation_codes WHERE code = ?")
-      .get(code.toUpperCase().trim());
+      .get(normalizedCode);
 
     if (!codeInfo) {
       ctx.throw(404, "授权码无效");
     }
 
-    // 检查是否过期
     if (codeInfo.expires_at && new Date(codeInfo.expires_at) < new Date()) {
       ctx.throw(410, "授权码已过期");
     }
 
-    // 检查下载次数
     if (codeInfo.download_used >= codeInfo.download_limit) {
       ctx.throw(410, "授权码已达使用上限");
     }
 
-    // 创建或获取匿名用户（授权码模式不需要手机号）
-    const userId = `code_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-
-    // 检查此机器是否已用过这个码（同一机器同一码不重复扣次数）
+    // 同一机器同一码不重复扣次数
     const existingRedemption = machine_id
       ? db.prepare("SELECT * FROM code_redemptions WHERE code = ? AND machine_id = ?")
-          .get(code.toUpperCase().trim(), machine_id)
+          .get(normalizedCode, machine_id)
       : null;
 
     if (existingRedemption) {
-      // 已经兑换过，直接签发新 JWT
       const user = db.prepare("SELECT * FROM users WHERE id = ?")
         .get(existingRedemption.user_id);
       if (user) {
-        const token = signToken(user, "*"); // 授权码模式不绑定设备
+        // 复用已有的 activation_id，签发新 JWT
+        const token = signToken(
+          { ...user, activation_id: existingRedemption.user_id },
+          "*"
+        );
         ctx.body = { jwt: token, reused: true };
         return;
       }
     }
 
-    // 事务：创建用户 + 消耗次数 + 记录兑换
+    // 生成唯一的 activation_id（一授权一标识）
+    const activationId = `act_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+
+    // 事务：创建用户记录 + 消耗次数 + 记录兑换 + 生成主密钥
     const doRedeem = db.transaction(() => {
       db.prepare(`
         INSERT INTO users (id, phone, plan, skills, devices, auth_mode)
         VALUES (?, NULL, ?, ?, 999, 'code')
-      `).run(userId, codeInfo.plan, codeInfo.skills);
+      `).run(activationId, codeInfo.plan, codeInfo.skills);
 
       db.prepare("UPDATE activation_codes SET download_used = download_used + 1 WHERE code = ?")
         .run(codeInfo.code);
 
       db.prepare("INSERT INTO code_redemptions (code, user_id, machine_id) VALUES (?, ?, ?)")
-        .run(codeInfo.code, userId, machine_id || null);
+        .run(codeInfo.code, activationId, machine_id || null);
     });
 
     doRedeem();
 
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
-    // 授权码模式：machine_id = "*"，不绑定设备
-    const token = signToken(user, "*");
+    // 一授权一生成：为此次激活生成独立的主密钥
+    generateMasterKey(activationId);
+
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(activationId);
+    const token = signToken(
+      { ...user, activation_id: activationId },
+      "*"
+    );
 
     ctx.body = {
       jwt: token,
       reused: false,
       remaining: codeInfo.download_limit - codeInfo.download_used - 1,
     };
+  });
+
+  // ── 管理接口：吊销授权（密钥立即失效）──────────────────
+  router.post("/admin/activations/:activationId/revoke", async (ctx) => {
+    const adminKey = ctx.get("X-Admin-Key");
+    if (adminKey !== process.env.ADMIN_KEY) {
+      ctx.throw(403, "管理员密钥无效");
+    }
+
+    const { activationId } = ctx.params;
+    const revoked = revokeMasterKey(activationId);
+    if (!revoked) {
+      ctx.throw(404, "激活记录不存在或已吊销");
+    }
+
+    ctx.body = { ok: true, message: "授权及密钥已吊销" };
   });
 
   // ── 管理接口：更新客户配置（微信公众号等）────────────────
