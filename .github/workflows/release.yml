@@ -98,12 +98,17 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-appimage
+          name: linux-appimage-${{ matrix.client.id }}
           path: _artifacts/linux/*.AppImage
 
   build-windows:
-    name: Build Windows NSIS
+    name: Build Windows NSIS (${{ matrix.client.id }})
     runs-on: windows-latest
+    strategy:
+      matrix:
+        client:
+          - id: default
+            license_api: https://license.openclaw.cn/api
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -118,17 +123,34 @@ jobs:
 
       - run: npm ci
 
+      - name: 准备客户端密钥
+        shell: bash
+        run: |
+          CLIENT_ID="${{ matrix.client.id }}"
+          KEY_FILE="src-tauri/keys/${CLIENT_ID}_pub.pem"
+          if [ -f "$KEY_FILE" ]; then
+            cp "$KEY_FILE" src-tauri/keys/license_pub.pem
+            echo "使用客户端 ${CLIENT_ID} 的 RSA 公钥"
+          else
+            echo "使用默认 RSA 公钥"
+          fi
+
       - name: 构建 Lite NSIS
         run: npm run tauri build
         env:
           OC_BUILD_BUNDLED: "0"
+          OC_CLIENT_ID: ${{ matrix.client.id }}
+          OC_LICENSE_API: ${{ matrix.client.license_api }}
 
       - name: 暂存 Lite NSIS
         shell: bash
         run: |
+          CLIENT_ID="${{ matrix.client.id }}"
+          SUFFIX=""
+          if [ "$CLIENT_ID" != "default" ]; then SUFFIX="-${CLIENT_ID}"; fi
           mkdir -p _artifacts/windows
           for f in src-tauri/target/release/bundle/nsis/*.exe; do
-            cp "$f" "_artifacts/windows/$(basename ${f%.exe})-lite.exe"
+            cp "$f" "_artifacts/windows/$(basename ${f%.exe})${SUFFIX}-lite.exe"
           done
           ls -lh _artifacts/windows/
 
@@ -188,18 +210,23 @@ jobs:
         run: npm run tauri build -- --features bundled
         env:
           OC_BUILD_BUNDLED: "1"
+          OC_CLIENT_ID: ${{ matrix.client.id }}
+          OC_LICENSE_API: ${{ matrix.client.license_api }}
 
       - name: 暂存 Full Bundle NSIS
         shell: bash
         run: |
+          CLIENT_ID="${{ matrix.client.id }}"
+          SUFFIX=""
+          if [ "$CLIENT_ID" != "default" ]; then SUFFIX="-${CLIENT_ID}"; fi
           for f in src-tauri/target/release/bundle/nsis/*.exe; do
-            cp "$f" "_artifacts/windows/$(basename ${f%.exe})-full.exe"
+            cp "$f" "_artifacts/windows/$(basename ${f%.exe})${SUFFIX}-full.exe"
           done
           ls -lh _artifacts/windows/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-nsis
+          name: windows-nsis-${{ matrix.client.id }}
           path: _artifacts/windows/*.exe
 
   build-macos:
