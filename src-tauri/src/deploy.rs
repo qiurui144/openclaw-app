@@ -108,17 +108,9 @@ fn emit_progress(window: &Window, step: u32, total: u32, msg: &str) {
     });
 }
 
-pub fn start_deploy(config: DeployConfig, window: Window) {
-    // 立即返回，部署在后台 Tokio 任务中运行
-    // 进度、完成、失败均通过 deploy:progress / deploy:done / deploy:failed 事件通知前端
-    tauri::async_runtime::spawn(async move {
-        match do_deploy(&config, &window).await {
-            Ok(()) => {}
-            Err(e) => {
-                let _ = window.emit("deploy:failed", &e.to_string());
-            }
-        }
-    });
+/// 异步命令直接调用，不 spawn 独立任务（确保事件在同一 async 上下文发出）
+pub async fn do_deploy_direct(config: DeployConfig, window: &Window) -> Result<()> {
+    do_deploy(&config, window).await
 }
 
 async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {

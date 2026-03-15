@@ -74,9 +74,14 @@ onMounted(async () => {
     source_mode: buildSourceMode(),
   };
   try {
+    // startDeploy 是 async 命令：整个部署过程中持续 await，
+    // 期间 deploy:progress / deploy:log 事件实时到达前端更新 UI。
+    // 命令正常返回 = 部署成功，抛异常 = 部署失败。
     await tauri.startDeploy(dto);
+    wizard.setDeployStatus("done");
+    tauri.clashStop().catch(() => {});
+    goTo("finish");
   } catch (e: unknown) {
-    // IPC 层错误（Rust panic / 未捕获异常），作为 failed 处理
     const msg = e instanceof Error ? e.message : String(e);
     wizard.setDeployStatus("failed");
     errorReason.value = msg;
