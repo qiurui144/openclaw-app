@@ -84,7 +84,7 @@ if [[ "${1:-}" != "--node-only" ]]; then
     rm "$FAT_TMP/raw.tgz"
 
     # 2. 在解压目录中 npm install 生产依赖（使用国内源）
-    echo "  安装生产依赖（npm install --omit=dev --registry=$NPM_REGISTRY）..."
+    echo "  安装生产依赖（npm install --omit=dev --registry=${NPM_REGISTRY}）..."
     (cd "$FAT_TMP/package" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY")
 
     # 3. 重新打包为 fat tarball（保留 package/ 前缀以兼容 deploy 解压逻辑）
