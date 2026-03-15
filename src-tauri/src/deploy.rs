@@ -243,6 +243,8 @@ async fn acquire_node(config: &DeployConfig, window: &Window) -> Result<()> {
                 let data = include_bytes!("../../resources/binaries/linux/node");
                 #[cfg(target_os = "windows")]
                 let data = include_bytes!("..\\..\\resources\\binaries\\windows\\node.exe");
+                #[cfg(target_os = "macos")]
+                let data = include_bytes!("../../resources/binaries/macos/node");
                 std::fs::write(&dest, &data[..])?;
                 #[cfg(unix)]
                 {
@@ -276,6 +278,8 @@ async fn acquire_openclaw_package(config: &DeployConfig, window: &Window) -> Res
                 let data = include_bytes!("../../resources/binaries/linux/openclaw.tgz");
                 #[cfg(target_os = "windows")]
                 let data = include_bytes!("..\\..\\resources\\binaries\\windows\\openclaw.tgz");
+                #[cfg(target_os = "macos")]
+                let data = include_bytes!("../../resources/binaries/macos/openclaw.tgz");
                 std::fs::write(&dest, &data[..])?;
             }
             #[cfg(not(feature = "bundled"))]

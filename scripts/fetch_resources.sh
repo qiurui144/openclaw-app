@@ -18,7 +18,7 @@ OPENCLAW_PKG="${OPENCLAW_PKG:-openclaw}"
 RESOURCES_DIR="${RESOURCES_DIR:-resources/binaries}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 
-mkdir -p "$RESOURCES_DIR/linux" "$RESOURCES_DIR/windows"
+mkdir -p "$RESOURCES_DIR/linux" "$RESOURCES_DIR/windows" "$RESOURCES_DIR/macos"
 
 # ── Node.js（单独二进制，离线模式只需要 node 本身）───────────
 if [[ ! -f "$RESOURCES_DIR/linux/node" ]] || [[ $(stat -c%s "$RESOURCES_DIR/linux/node" 2>/dev/null || echo 0) -lt 1000000 ]]; then
@@ -28,6 +28,15 @@ if [[ ! -f "$RESOURCES_DIR/linux/node" ]] || [[ $(stat -c%s "$RESOURCES_DIR/linu
   chmod +x "$RESOURCES_DIR/linux/node"
 else
   echo "Linux Node.js 已存在（$(du -sh "$RESOURCES_DIR/linux/node" | cut -f1)），跳过"
+fi
+
+if [[ ! -f "$RESOURCES_DIR/macos/node" ]] || [[ $(stat -c%s "$RESOURCES_DIR/macos/node" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+  echo "下载 macOS Node.js ${NODE_VERSION} (arm64)..."
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz" \
+    | tar -xz --strip-components=2 -C "$RESOURCES_DIR/macos" "node-v${NODE_VERSION}-darwin-arm64/bin/node"
+  chmod +x "$RESOURCES_DIR/macos/node"
+else
+  echo "macOS Node.js 已存在（$(du -sh "$RESOURCES_DIR/macos/node" | cut -f1)），跳过"
 fi
 
 if [[ ! -f "$RESOURCES_DIR/windows/node.exe" ]] || [[ $(stat -c%s "$RESOURCES_DIR/windows/node.exe" 2>/dev/null || echo 0) -lt 1000000 ]]; then
@@ -80,6 +89,7 @@ if [[ "${1:-}" != "--node-only" ]]; then
 
     cp "$FAT_TMP/openclaw.tgz" "$RESOURCES_DIR/linux/openclaw.tgz"
     cp "$FAT_TMP/openclaw.tgz" "$RESOURCES_DIR/windows/openclaw.tgz"
+    cp "$FAT_TMP/openclaw.tgz" "$RESOURCES_DIR/macos/openclaw.tgz"
     rm -rf "$FAT_TMP"
     trap - EXIT
 
@@ -117,8 +127,19 @@ else
   echo "Windows Mihomo 已存在，跳过"
 fi
 
+if [[ ! -f "$RESOURCES_DIR/macos/mihomo" ]] || [[ $(stat -c%s "$RESOURCES_DIR/macos/mihomo" 2>/dev/null || echo 0) -lt 1000000 ]]; then
+  echo "下载 macOS Mihomo ${MIHOMO_VERSION} (arm64)..."
+  curl -fsSL "${MIHOMO_BASE_URL}/mihomo-darwin-arm64-v${MIHOMO_VERSION}.gz" -o /tmp/mihomo_mac.gz
+  gunzip -f /tmp/mihomo_mac.gz
+  mv /tmp/mihomo_mac "$RESOURCES_DIR/macos/mihomo"
+  chmod +x "$RESOURCES_DIR/macos/mihomo"
+else
+  echo "macOS Mihomo 已存在，跳过"
+fi
+
 echo ""
 echo "=== 资源清单 ==="
 ls -lh "$RESOURCES_DIR/linux/node" "$RESOURCES_DIR/linux/openclaw.tgz" "$RESOURCES_DIR/linux/mihomo" \
-       "$RESOURCES_DIR/windows/node.exe" "$RESOURCES_DIR/windows/openclaw.tgz" "$RESOURCES_DIR/windows/mihomo.exe" 2>/dev/null || true
+       "$RESOURCES_DIR/windows/node.exe" "$RESOURCES_DIR/windows/openclaw.tgz" "$RESOURCES_DIR/windows/mihomo.exe" \
+       "$RESOURCES_DIR/macos/node" "$RESOURCES_DIR/macos/openclaw.tgz" "$RESOURCES_DIR/macos/mihomo" 2>/dev/null || true
 echo "================"

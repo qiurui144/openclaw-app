@@ -121,12 +121,20 @@ jobs:
           unzip -p node_win.zip "node-v${NODE_VERSION}-win-x64/node.exe" > resources/binaries/windows/node.exe
           rm node_win.zip
 
-          # openclaw.tgz
-          echo "=== 下载 openclaw 服务包 ==="
+          # openclaw fat tarball（含 node_modules，离线模式无需 npm install）
+          echo "=== 构建 openclaw fat tarball ==="
           OC_VERSION=$(npm view openclaw version --registry https://registry.npmmirror.com 2>/dev/null || npm view openclaw version)
           OC_URL=$(npm view "openclaw@${OC_VERSION}" dist.tarball --registry https://registry.npmmirror.com 2>/dev/null || npm view "openclaw@${OC_VERSION}" dist.tarball)
           echo "openclaw@${OC_VERSION}: ${OC_URL}"
-          curl -fL "$OC_URL" -o resources/binaries/windows/openclaw.tgz
+          FAT_TMP=$(mktemp -d)
+          curl -fL "$OC_URL" -o "$FAT_TMP/raw.tgz"
+          mkdir -p "$FAT_TMP/package"
+          tar -xzf "$FAT_TMP/raw.tgz" -C "$FAT_TMP/package" --strip-components=1
+          (cd "$FAT_TMP/package" && npm install --omit=dev --no-audit --no-fund --registry=https://registry.npmmirror.com)
+          (cd "$FAT_TMP" && tar -czf openclaw.tgz package/)
+          cp "$FAT_TMP/openclaw.tgz" resources/binaries/windows/openclaw.tgz
+          rm -rf "$FAT_TMP"
+          echo "fat tarball: $(du -sh resources/binaries/windows/openclaw.tgz | cut -f1)"
 
           # Mihomo（动态查 ZIP 内 exe 名，防止版本重命名导致 0 字节静默失败）
           echo "=== 下载 Mihomo ${MIHOMO_VERSION} ==="

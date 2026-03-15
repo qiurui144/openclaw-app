@@ -47,7 +47,6 @@ pub async fn check_status(port: u16) -> ServiceStatus {
 
 pub fn start(meta: &DeployMeta) -> Result<()> {
     let node_bin = crate::deploy::node_bin_path(&meta.install_path);
-    // npm tarball 解压后入口在 openclaw_pkg/package/openclaw.mjs
     let script = PathBuf::from(&meta.install_path)
         .join("openclaw_pkg")
         .join("package")
@@ -82,17 +81,30 @@ pub fn start(meta: &DeployMeta) -> Result<()> {
                 return Ok(());
             }
         }
-        // 回退：直接 spawn 进程
-        std::process::Command::new(&node_bin)
-            .args([
-                script.to_str().unwrap_or_default(),
-                "gateway",
-                "--port",
-                &meta.service_port.to_string(),
-            ])
-            .env("NODE_ENV", "production")
-            .spawn()
-            .map_err(|e| anyhow::anyhow!("启动失败: {e}"))?;
+        spawn_node(&node_bin, &script, meta.service_port)?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let elevated = crate::system_check::is_elevated();
+        let plist_path = if elevated {
+            PathBuf::from("/Library/LaunchDaemons/com.openclaw.gateway.plist")
+        } else {
+            dirs::home_dir().unwrap_or_default()
+                .join("Library/LaunchAgents/com.openclaw.gateway.plist")
+        };
+
+        if plist_path.exists() {
+            let ok = std::process::Command::new("launchctl")
+                .args(["load", "-w", plist_path.to_str().unwrap_or("")])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if ok {
+                return Ok(());
+            }
+        }
+        spawn_node(&node_bin, &script, meta.service_port)?;
     }
 
     #[cfg(target_os = "windows")]
@@ -103,16 +115,7 @@ pub fn start(meta: &DeployMeta) -> Result<()> {
             .map(|s| s.success())
             .unwrap_or(false);
         if !ran {
-            std::process::Command::new(&node_bin)
-                .args([
-                    script.to_str().unwrap_or_default(),
-                    "gateway",
-                    "--port",
-                    &meta.service_port.to_string(),
-                ])
-                .env("NODE_ENV", "production")
-                .spawn()
-                .map_err(|e| anyhow::anyhow!("启动失败: {e}"))?;
+            spawn_node(&node_bin, &script, meta.service_port)?;
         }
     }
 
@@ -134,7 +137,25 @@ pub fn stop() -> Result<()> {
                 .args(["10", "systemctl", "--user", "stop", "openclaw.service"])
                 .status();
         }
-        // 兜底：杀掉残留的 openclaw.mjs 进程
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "openclaw.mjs"])
+            .status();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let elevated = crate::system_check::is_elevated();
+        let plist_path = if elevated {
+            PathBuf::from("/Library/LaunchDaemons/com.openclaw.gateway.plist")
+        } else {
+            dirs::home_dir().unwrap_or_default()
+                .join("Library/LaunchAgents/com.openclaw.gateway.plist")
+        };
+        if plist_path.exists() {
+            let _ = std::process::Command::new("launchctl")
+                .args(["unload", "-w", plist_path.to_str().unwrap_or("")])
+                .status();
+        }
         let _ = std::process::Command::new("pkill")
             .args(["-f", "openclaw.mjs"])
             .status();
@@ -145,7 +166,6 @@ pub fn stop() -> Result<()> {
         let _ = std::process::Command::new("schtasks")
             .args(["/End", "/TN", "OpenClaw Gateway"])
             .status();
-        // 精准终止含 openclaw.mjs 的 node 进程
         let _ = std::process::Command::new("wmic")
             .args([
                 "process",
@@ -157,5 +177,21 @@ pub fn stop() -> Result<()> {
             .status();
     }
 
+    Ok(())
+}
+
+// ── 辅助：直接 spawn node 进程（各平台通用回退）─────────────────────────────
+
+fn spawn_node(node_bin: &PathBuf, script: &PathBuf, port: u16) -> Result<()> {
+    std::process::Command::new(node_bin)
+        .args([
+            script.to_str().unwrap_or_default(),
+            "gateway",
+            "--port",
+            &port.to_string(),
+        ])
+        .env("NODE_ENV", "production")
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("启动失败: {e}"))?;
     Ok(())
 }

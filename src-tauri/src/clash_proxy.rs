@@ -43,6 +43,8 @@ fn ensure_mihomo_binary() -> Result<PathBuf> {
         let data = include_bytes!("../../resources/binaries/linux/mihomo");
         #[cfg(target_os = "windows")]
         let data = include_bytes!("..\\..\\resources\\binaries\\windows\\mihomo.exe");
+        #[cfg(target_os = "macos")]
+        let data = include_bytes!("../../resources/binaries/macos/mihomo");
 
         std::fs::write(&bin, &data[..])?;
         #[cfg(unix)]
