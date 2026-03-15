@@ -131,8 +131,11 @@ fn write_platform_config(
 }
 
 #[tauri::command]
-fn open_url(url: String) -> Result<(), String> {
-    open::that(&url).map_err(|e| e.to_string())
+async fn open_url(url: String) -> Result<(), String> {
+    // 在独立线程执行，避免某些系统上 xdg-open 阻塞 IPC
+    tokio::task::spawn_blocking(move || {
+        open::that(&url).map_err(|e| e.to_string())
+    }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]

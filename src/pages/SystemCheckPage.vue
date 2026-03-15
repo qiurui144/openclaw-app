@@ -44,9 +44,14 @@ const allRequired = computed(() => failedRequired.value.length === 0 && checks.v
 
 onMounted(async () => {
   wizard.setReady(false);
-  const results = await tauri.runSystemCheck();
-  wizard.setChecks(results);
-  wizard.setReady(allRequired.value);
+  try {
+    const results = await tauri.runSystemCheck();
+    wizard.setChecks(results);
+    wizard.setReady(allRequired.value);
+  } catch {
+    // 检查失败时仍允许继续（用户可手动判断环境）
+    wizard.setReady(true);
+  }
 });
 
 function handleNext() {

@@ -341,9 +341,13 @@ fn install_npm_dependencies(config: &DeployConfig, pkg_dir: &PathBuf, window: &W
     let mut cmd = std::process::Command::new(&node_bin);
     cmd.arg(&npm_cli)
         .args(["install", "--omit=dev", "--no-audit", "--no-fund",
+               "--no-package-lock",
                "--registry=https://registry.npmmirror.com"])
         .current_dir(pkg_dir)
-        .env("NODE_ENV", "production");
+        .env("NODE_ENV", "production")
+        // 隔离：不读取用户级 .npmrc，不写入全局 npm cache
+        .env("npm_config_userconfig", pkg_dir.join(".npmrc_empty").to_str().unwrap_or(""))
+        .env("npm_config_cache", PathBuf::from(&config.install_path).join(".npm_cache").to_str().unwrap_or(""));
 
     for (k, v) in &proxy_env {
         cmd.env(k, v);
