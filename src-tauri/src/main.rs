@@ -335,10 +335,10 @@ async fn refresh_expired_skills(install_path: String) -> Result<Vec<String>, Str
     for slug in &slugs {
         if skills_registry::is_skill_cache_expired(slug) {
             if license::can_access_skill(slug) {
-                skills_registry::install_paid_skill(&install_path, slug, &jwt)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                refreshed.push(slug.clone());
+                match skills_registry::install_paid_skill(&install_path, slug, &jwt).await {
+                    Ok(()) => refreshed.push(slug.clone()),
+                    Err(e) => eprintln!("[refresh] {} 刷新失败: {e}", slug),
+                }
             }
         }
     }

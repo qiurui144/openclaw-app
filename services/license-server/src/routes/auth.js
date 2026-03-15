@@ -54,7 +54,8 @@ export function authRoutes(router) {
     }
 
     const code = generateCode();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    // 使用 SQLite 兼容的 datetime 格式（无 T 无 Z），确保与 datetime('now') 比较正确
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
 
     const db = getDb();
     db.prepare("INSERT INTO sms_codes (phone, code, expires_at) VALUES (?, ?, ?)")

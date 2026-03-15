@@ -131,6 +131,13 @@ fn decrypt_content(ciphertext_b64: &str, nonce_b64: &str, key: &[u8]) -> Result<
     let mut ciphertext = b64.decode(ciphertext_b64)?;
     let nonce_bytes = b64.decode(nonce_b64)?;
 
+    if key.len() != 32 {
+        anyhow::bail!("解密密钥长度错误：期望 32 字节，实际 {} 字节", key.len());
+    }
+    if nonce_bytes.len() != 12 {
+        anyhow::bail!("nonce 长度错误：期望 12 字节，实际 {} 字节", nonce_bytes.len());
+    }
+
     let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, key)
         .map_err(|_| anyhow::anyhow!("无效的解密密钥"))?;
     let nonce = aead::Nonce::try_assume_unique_for_key(&nonce_bytes)

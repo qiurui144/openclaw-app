@@ -51,7 +51,7 @@
             到期：{{ license.status.expires_at || '—' }}
             <span v-if="license.status.in_grace_period" class="grace-warn">（宽限期）</span>
           </span>
-          <button class="btn-sm-link" @click="showUpgrade = true" v-if="license.status.plan === 'free'">升级 Pro</button>
+          <button class="btn-sm-link" @click="upgradeClicked" v-if="license.status.plan === 'free'">升级 Pro</button>
           <button class="btn-sm-link logout" @click="doLogout">退出</button>
         </template>
         <template v-else>
@@ -197,7 +197,6 @@ const operatingSlug = ref<string | null>(null);
 // 弹窗状态
 const showLogin = ref(false);
 const showPayment = ref(false);
-const showUpgrade = ref(false);
 const paymentTitle = ref("");
 const paymentPlan = ref("");
 const paymentSlug = ref<string | undefined>(undefined);
@@ -301,6 +300,17 @@ async function uninstallSkill(slug: string) {
   } finally {
     operatingSlug.value = null;
   }
+}
+
+function upgradeClicked() {
+  if (!license.isAuthenticated) {
+    showLogin.value = true;
+    return;
+  }
+  paymentTitle.value = "升级 Pro 全包";
+  paymentPlan.value = "pro_all";
+  paymentSlug.value = undefined;
+  showPayment.value = true;
 }
 
 function purchaseSkill(skill: SkillEntry) {

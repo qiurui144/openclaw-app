@@ -139,8 +139,8 @@ fn verify_jwt(token: &str) -> Result<LicenseClaims> {
     Ok(claims)
 }
 
-/// 开发模式：跳过签名验证，仅解析 payload
-#[allow(dead_code)]
+/// 开发模式：跳过签名验证，仅解析 payload（仅 debug 构建可用）
+#[cfg(debug_assertions)]
 fn verify_jwt_dev(token: &str) -> Result<LicenseClaims> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
@@ -173,11 +173,14 @@ pub fn load_license() -> LicenseStatus {
         _ => return LicenseStatus::default(),
     };
 
+    #[cfg(debug_assertions)]
     let verify_fn = if std::env::var("DEV_SKIP_SIGNATURE").is_ok() {
         verify_jwt_dev
     } else {
         verify_jwt
     };
+    #[cfg(not(debug_assertions))]
+    let verify_fn = verify_jwt;
 
     match verify_fn(&token) {
         Ok(claims) => {
@@ -190,8 +193,7 @@ pub fn load_license() -> LicenseStatus {
                 user_id: Some(claims.sub),
                 skills: claims.skills,
                 expires_at: chrono::DateTime::from_timestamp(claims.exp, 0)
-                    .map(|dt| Some(dt.format("%Y-%m-%d").to_string()))
-                    .unwrap_or(None),
+                    .map(|dt| dt.format("%Y-%m-%d").to_string()),
                 in_grace_period: now > claims.exp,
                 device_bound: !is_code_mode,
             }

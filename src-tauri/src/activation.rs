@@ -48,12 +48,14 @@ pub fn is_activated() -> bool {
         _ => return false,
     };
 
-    // 验证 activation JWT 的有效期
+    #[cfg(debug_assertions)]
     let verify_fn = if std::env::var("DEV_SKIP_SIGNATURE").is_ok() {
         verify_activation_dev
     } else {
         verify_activation
     };
+    #[cfg(not(debug_assertions))]
+    let verify_fn = verify_activation;
 
     verify_fn(&token).is_ok()
 }
@@ -145,7 +147,8 @@ fn verify_activation(token: &str) -> Result<serde_json::Value> {
     Ok(token_data.claims)
 }
 
-/// 开发模式：跳过签名验证
+/// 开发模式：跳过签名验证（仅 debug 构建可用）
+#[cfg(debug_assertions)]
 fn verify_activation_dev(token: &str) -> Result<serde_json::Value> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 

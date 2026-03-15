@@ -97,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onUnmounted } from "vue";
 import { useLicenseStore } from "@/stores/license";
 
 const emit = defineEmits<{ close: []; success: [] }>();
@@ -121,6 +121,10 @@ const isCodeValid = computed(() => {
 });
 
 let timer: ReturnType<typeof setInterval> | null = null;
+
+onUnmounted(() => {
+  if (timer) { clearInterval(timer); timer = null; }
+});
 
 async function sendSms() {
   if (!isPhoneValid.value) return;

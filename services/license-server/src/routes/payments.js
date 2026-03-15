@@ -7,8 +7,6 @@ import {
   getAccessToken,
   sendTemplateMessage,
 } from "../wechat.js";
-import { generateMasterKey } from "../keymanager.js";
-
 // 套餐价格表（元）
 const PLAN_PRICES = {
   pro_single: null,   // 按具体 skill 定价
@@ -58,16 +56,10 @@ function completeOrder(db, orderId, order) {
 
   const code = doComplete();
 
-  // 一授权一生成：为授权码生成独立主密钥（generateMasterKey 内部有事务保护）
-  const activationId = `pay_${orderId}`;
-  try {
-    generateMasterKey(activationId);
-  } catch (e) {
-    console.error(`[支付] 主密钥生成失败（订单 ${orderId}）: ${e.message}`);
-    // 密钥生成失败不回滚订单（授权码已可用于兑换，兑换时会重新生成密钥）
-  }
+  // 主密钥在授权码兑换时（/auth/redeem-code）按需生成，此处不提前生成
+  // 避免 activation_id 与兑换流程不一致导致密钥永远不被使用
 
-  return { code, activationId };
+  return { code };
 }
 
 /**

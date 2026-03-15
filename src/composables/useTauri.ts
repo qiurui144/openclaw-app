@@ -33,10 +33,12 @@ export interface DeployMeta {
 export interface LicenseStatusDto {
   authenticated: boolean;
   plan: string;
+  auth_mode: string;
   user_id: string | null;
   skills: string[];
   expires_at: string | null;
   in_grace_period: boolean;
+  device_bound: boolean;
 }
 
 export const tauri = {

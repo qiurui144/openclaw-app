@@ -60,6 +60,8 @@ export function verifyToken(token) {
  * @returns {object} decoded payload
  */
 export function verifyTokenForRefresh(token) {
+  // clockTolerance 在 jsonwebtoken 库中的实际行为是 exp + tolerance >= now，
+  // 因此 7 天的 tolerance 等效于允许过期 7 天内的 token 通过验证。
   return jwt.verify(token, getPublicKey(), {
     algorithms: ["RS256"],
     issuer: ISSUER,

@@ -65,13 +65,12 @@ onMounted(async () => {
         const status = await license.checkPayment(order.value.order_id);
         if (status === "paid") {
           payStatus.value = "paid";
-          if (pollTimer) clearInterval(pollTimer);
-          // 刷新许可证
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
           await license.refresh();
           emit("success");
         } else if (status === "failed" || status === "expired") {
           payStatus.value = "failed";
-          if (pollTimer) clearInterval(pollTimer);
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
       } catch { /* 静默 */ }
     }, 3000);

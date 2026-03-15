@@ -138,7 +138,11 @@ export const useLicenseStore = defineStore("license", () => {
   }
 
   async function loadInstalledPaid() {
-    installedPaidSlugs.value = await invoke<string[]>("list_paid_skills");
+    try {
+      installedPaidSlugs.value = await invoke<string[]>("list_paid_skills");
+    } catch {
+      installedPaidSlugs.value = [];
+    }
   }
 
   async function installPaidSkill(installPath: string, slug: string) {

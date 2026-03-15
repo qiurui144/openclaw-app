@@ -50,6 +50,7 @@ const remaining = ref(0);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
+let redirectTimer: ReturnType<typeof setTimeout> | null = null;
 let expiresAt = 0;
 
 onMounted(async () => {
@@ -70,6 +71,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
   if (countdownTimer) clearInterval(countdownTimer);
+  if (redirectTimer) clearTimeout(redirectTimer);
 });
 
 async function fetchQrCode() {
@@ -116,7 +118,7 @@ async function pollStatus() {
       if (pollTimer) clearInterval(pollTimer);
       if (countdownTimer) clearInterval(countdownTimer);
       // 短暂延迟后跳转，让用户看到成功提示
-      setTimeout(() => next(), 800);
+      redirectTimer = setTimeout(() => next(), 800);
     } else if (result.expired) {
       isExpired.value = true;
       if (pollTimer) clearInterval(pollTimer);
