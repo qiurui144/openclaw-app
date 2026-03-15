@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 const routes = [
   { path: "/",                  name: "welcome",           component: () => import("@/pages/WelcomePage.vue") },
   { path: "/check",             name: "check",             component: () => import("@/pages/SystemCheckPage.vue") },
+  { path: "/activation",        name: "activation",        component: () => import("@/pages/ActivationGatePage.vue") },
   { path: "/source",            name: "source",            component: () => import("@/pages/SourcePage.vue") },
   { path: "/clash-disclaimer",  name: "clash-disclaimer",  component: () => import("@/pages/ClashDisclaimerPage.vue") },
   { path: "/clash-config",      name: "clash-config",      component: () => import("@/pages/ClashConfigPage.vue") },

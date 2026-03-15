@@ -35,18 +35,34 @@ jobs:
 
       - run: npm ci
 
+      - name: 准备客户端密钥
+        run: |
+          CLIENT_ID="${{ matrix.client.id }}"
+          KEY_FILE="src-tauri/keys/${CLIENT_ID}_pub.pem"
+          if [ -f "$KEY_FILE" ]; then
+            cp "$KEY_FILE" src-tauri/keys/license_pub.pem
+            echo "使用客户端 ${CLIENT_ID} 的 RSA 公钥"
+          else
+            echo "使用默认 RSA 公钥"
+          fi
+
       - name: 构建 Lite AppImage
         # 不指定 --target，CI runner 默认 x86_64-unknown-linux-gnu，输出到 target/release/
         run: npm run tauri build
         env:
           OC_BUILD_BUNDLED: "0"
           OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
+          OC_CLIENT_ID: ${{ matrix.client.id }}
+          OC_LICENSE_API: ${{ matrix.client.license_api }}
 
       - name: 暂存 Lite AppImage
         run: |
+          CLIENT_ID="${{ matrix.client.id }}"
+          SUFFIX=""
+          if [ "$CLIENT_ID" != "default" ]; then SUFFIX="-${CLIENT_ID}"; fi
           mkdir -p _artifacts/linux
           for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
-            cp "$f" "_artifacts/linux/$(basename ${f%.AppImage})-lite.AppImage"
+            cp "$f" "_artifacts/linux/$(basename ${f%.AppImage})${SUFFIX}-lite.AppImage"
           done
           ls -lh _artifacts/linux/
 
@@ -63,11 +79,16 @@ jobs:
         env:
           OC_BUILD_BUNDLED: "1"
           OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
+          OC_CLIENT_ID: ${{ matrix.client.id }}
+          OC_LICENSE_API: ${{ matrix.client.license_api }}
 
       - name: 暂存 Full Bundle AppImage
         run: |
+          CLIENT_ID="${{ matrix.client.id }}"
+          SUFFIX=""
+          if [ "$CLIENT_ID" != "default" ]; then SUFFIX="-${CLIENT_ID}"; fi
           for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
-            cp "$f" "_artifacts/linux/$(basename ${f%.AppImage})-full.AppImage"
+            cp "$f" "_artifacts/linux/$(basename ${f%.AppImage})${SUFFIX}-full.AppImage"
           done
           ls -lh _artifacts/linux/
 

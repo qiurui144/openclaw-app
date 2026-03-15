@@ -9,6 +9,9 @@ mod skills_manager;
 mod updater;
 mod service_ctrl;
 mod tray;
+mod license;
+mod skills_registry;
+mod activation;
 
 // ── 向导命令 ──────────────────────────────────────────────────────────────────
 
@@ -241,6 +244,154 @@ async fn notify_deploy_done(app: tauri::AppHandle) {
     tray::refresh_tray_icon(&app).await;
 }
 
+// ── 许可证命令 ──────────────────────────────────────────────────────────────
+
+/// 获取当前许可证状态
+#[tauri::command]
+fn get_license_status() -> license::LicenseStatus {
+    license::load_license()
+}
+
+/// 获取机器指纹
+#[tauri::command]
+fn get_machine_id() -> String {
+    license::machine_id()
+}
+
+/// 发送登录验证码
+#[tauri::command]
+async fn send_login_code(phone: String) -> Result<(), String> {
+    license::send_sms_code(&phone).await.map_err(|e| e.to_string())
+}
+
+/// 手机号 + 验证码登录
+#[tauri::command]
+async fn license_login(phone: String, code: String) -> Result<license::LicenseStatus, String> {
+    license::login(&phone, &code).await.map_err(|e| e.to_string())
+}
+
+/// 刷新许可证令牌
+#[tauri::command]
+async fn refresh_license() -> Result<license::LicenseStatus, String> {
+    license::refresh_token().await.map_err(|e| e.to_string())
+}
+
+/// 使用授权码激活
+#[tauri::command]
+async fn redeem_activation_code(code: String) -> Result<license::LicenseStatus, String> {
+    license::redeem_code(&code).await.map_err(|e| e.to_string())
+}
+
+/// 登出
+#[tauri::command]
+fn license_logout() {
+    license::logout();
+}
+
+// ── Skills 商店命令 ──────────────────────────────────────────────────────────
+
+/// 获取 Skill 索引（免费 + 付费混合列表）
+#[tauri::command]
+async fn fetch_skill_index() -> Result<Vec<skills_registry::SkillEntry>, String> {
+    skills_registry::fetch_skill_index().await.map_err(|e| e.to_string())
+}
+
+/// 安装付费 Skill
+#[tauri::command]
+async fn install_paid_skill(
+    install_path: String,
+    slug: String,
+) -> Result<(), String> {
+    let jwt = license::current_jwt().ok_or("未登录，请先登录".to_string())?;
+    if !license::can_access_skill(&slug) {
+        return Err("无权访问此 Skill，请升级订阅".to_string());
+    }
+    skills_registry::install_paid_skill(&install_path, &slug, &jwt)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 卸载付费 Skill
+#[tauri::command]
+fn uninstall_paid_skill(slug: String) -> Result<(), String> {
+    skills_registry::uninstall_paid_skill(&slug).map_err(|e| e.to_string())
+}
+
+/// 列出已安装的付费 Skills
+#[tauri::command]
+fn list_paid_skills() -> Vec<String> {
+    skills_registry::list_installed_paid_skills()
+}
+
+/// 刷新过期的付费 Skill 缓存（重新从 API 拉取内容）
+#[tauri::command]
+async fn refresh_expired_skills(install_path: String) -> Result<Vec<String>, String> {
+    let jwt = match license::current_jwt() {
+        Some(j) => j,
+        None => return Ok(vec![]),
+    };
+    let slugs = skills_registry::list_installed_paid_skills();
+    let mut refreshed = vec![];
+    for slug in &slugs {
+        if skills_registry::is_skill_cache_expired(slug) {
+            if license::can_access_skill(slug) {
+                skills_registry::install_paid_skill(&install_path, slug, &jwt)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                refreshed.push(slug.clone());
+            }
+        }
+    }
+    Ok(refreshed)
+}
+
+/// 创建支付订单
+#[tauri::command]
+async fn create_payment(
+    plan: String,
+    skill_slug: Option<String>,
+) -> Result<skills_registry::PaymentOrder, String> {
+    let jwt = license::current_jwt().ok_or("未登录，请先登录".to_string())?;
+    skills_registry::create_payment_order(&jwt, &plan, skill_slug.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 查询支付状态
+#[tauri::command]
+async fn check_payment(order_id: String) -> Result<String, String> {
+    let jwt = license::current_jwt().ok_or("未登录，请先登录".to_string())?;
+    skills_registry::check_payment_status(&jwt, &order_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ── 公众号激活命令 ────────────────────────────────────────────────────────────
+
+/// 检查是否已通过公众号验证
+#[tauri::command]
+fn check_activation_status() -> bool {
+    activation::is_activated()
+}
+
+/// 请求公众号带参二维码
+#[tauri::command]
+async fn request_activation_qr() -> Result<activation::ActivationQr, String> {
+    activation::request_qrcode().await.map_err(|e| e.to_string())
+}
+
+/// 轮询公众号关注状态
+#[tauri::command]
+async fn poll_activation(ticket: String) -> Result<activation::ActivationResult, String> {
+    activation::check_activation(&ticket).await.map_err(|e| e.to_string())
+}
+
+/// 获取客户端 ID（品牌标识）
+#[tauri::command]
+fn get_client_id() -> String {
+    activation::get_client_id().to_string()
+}
+
 // ── 应用入口 ──────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -287,6 +438,27 @@ fn main() {
             service_start,
             service_stop,
             notify_deploy_done,
+            // 许可证
+            get_license_status,
+            get_machine_id,
+            send_login_code,
+            license_login,
+            refresh_license,
+            redeem_activation_code,
+            license_logout,
+            // Skills 商店
+            fetch_skill_index,
+            install_paid_skill,
+            uninstall_paid_skill,
+            list_paid_skills,
+            create_payment,
+            check_payment,
+            refresh_expired_skills,
+            // 公众号激活
+            check_activation_status,
+            request_activation_qr,
+            poll_activation,
+            get_client_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

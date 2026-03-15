@@ -2,11 +2,11 @@ import { useRouter } from "vue-router";
 import { useWizardStore } from "@/stores/wizard";
 
 const INSTALL_ROUTES = [
-  "welcome", "check", "source", "install", "service", "ai-token", "platform", "deploy", "finish",
+  "welcome", "check", "activation", "source", "install", "service", "ai-token", "platform", "deploy", "finish",
 ];
 
 const INSTALL_ONLINE_ROUTES = [
-  "welcome", "check", "source", "clash-disclaimer", "clash-config",
+  "welcome", "check", "activation", "source", "clash-disclaimer", "clash-config",
   "install", "service", "ai-token", "platform", "deploy", "finish",
 ];
 

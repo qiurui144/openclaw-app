@@ -1,0 +1,21 @@
+{
+  "name": "@openclaw/license-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenClaw Skills 授权服务",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "keygen": "node src/keygen.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "koa": "^2.15.0",
+    "koa-bodyparser": "^4.4.0",
+    "koa-router": "^13.0.0"
+  },
+  "devDependencies": {}
+}

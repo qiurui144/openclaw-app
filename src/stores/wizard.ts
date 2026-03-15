@@ -31,6 +31,7 @@ export const useWizardStore = defineStore("wizard", () => {
   const deployStatus = ref<DeployStatus>("idle");
   const deployProgress = ref<DeployProgress>({ step: 0, total: 11, percent: 0, message: "" });
   const deployLogs = ref<string[]>([]);
+  const activationVerified = ref(false);
   const isExistingInstall = ref(false);
   const existingVersion = ref<string | null>(null);
   const existingPath = ref<string | null>(null);
@@ -54,11 +55,13 @@ export const useWizardStore = defineStore("wizard", () => {
     existingPath.value = path;
   }
 
+  function setActivationVerified(v: boolean) { activationVerified.value = v; }
+
   return {
     currentPage, wizardMode, canProceed, systemChecks, sourceMode,
     clashAccepted, deployStatus, deployProgress, deployLogs,
-    isExistingInstall, existingVersion, existingPath,
+    activationVerified, isExistingInstall, existingVersion, existingPath,
     setReady, setWizardMode, setChecks, setSourceMode, setClashAccepted,
-    setDeployStatus, updateProgress, appendLog, setExistingInstall,
+    setDeployStatus, updateProgress, appendLog, setExistingInstall, setActivationVerified,
   };
 });

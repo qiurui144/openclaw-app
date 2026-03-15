@@ -41,31 +41,134 @@
         <button v-if="serviceState === 'stopped'" class="btn-restart" @click="restartService">▶ 启动服务</button>
       </div>
 
-      <div class="next-steps">
-        <div class="ns-title">接下来您可以：</div>
-        <div class="ns-item">🔐 <span>用设置的管理员密码登录控制台</span></div>
-        <div class="ns-item">🔌 <span>在控制台「平台管理」中添加企业微信/钉钉/飞书机器人</span></div>
-        <div class="ns-item">🧩 <span>在「Skills 管理」中安装所需的 AI 技能插件</span></div>
-        <div class="ns-item">📋 <span>在「日志」中监控机器人运行状态</span></div>
-        <div class="ns-item">🔄 <span>通过控制台「系统设置」检查版本更新</span></div>
+      <!-- 许可证状态栏 -->
+      <div class="license-bar">
+        <template v-if="license.isAuthenticated">
+          <span class="plan-badge" :class="license.status.plan">{{ license.planLabel }}</span>
+          <span class="auth-mode-tag" v-if="license.status.auth_mode === 'code'">授权码</span>
+          <span class="auth-mode-tag device" v-else-if="license.status.device_bound">设备绑定</span>
+          <span class="license-info">
+            到期：{{ license.status.expires_at || '—' }}
+            <span v-if="license.status.in_grace_period" class="grace-warn">（宽限期）</span>
+          </span>
+          <button class="btn-sm-link" @click="showUpgrade = true" v-if="license.status.plan === 'free'">升级 Pro</button>
+          <button class="btn-sm-link logout" @click="doLogout">退出</button>
+        </template>
+        <template v-else>
+          <span class="plan-badge free">免费版</span>
+          <button class="btn-sm-link" @click="showLogin = true">登录 / 激活</button>
+          <span class="license-hint">手机号登录或授权码激活</span>
+        </template>
       </div>
 
-      <div class="skills-section" v-if="updatableSkills.length">
-        <h3>可更新的 Skills（{{ updatableSkills.length }}）</h3>
-        <div class="skill-list">
-          <div class="skill-row" v-for="s in updatableSkills" :key="s.name">
-            <span>{{ s.name }}</span>
-            <span class="version">{{ s.current_version }} → {{ s.latest_version }}</span>
+      <!-- Tab 导航 -->
+      <div class="tab-bar">
+        <button
+          v-for="tab in tabs"
+          :key="tab.key"
+          class="tab-btn"
+          :class="{ active: activeTab === tab.key }"
+          @click="activeTab = tab.key"
+        >
+          {{ tab.label }}
+          <span v-if="tab.count !== undefined" class="tab-count">{{ tab.count }}</span>
+        </button>
+      </div>
+
+      <!-- Tab 内容 -->
+      <div class="tab-content">
+        <!-- 概览 Tab -->
+        <div v-if="activeTab === 'overview'" class="overview-tab">
+          <div class="next-steps">
+            <div class="ns-title">接下来您可以：</div>
+            <div class="ns-item">🔐 <span>用设置的管理员密码登录控制台</span></div>
+            <div class="ns-item">🔌 <span>在控制台「平台管理」中添加企业微信/钉钉/飞书机器人</span></div>
+            <div class="ns-item">🧩 <span>在「Skills 管理」中安装所需的 AI 技能插件</span></div>
+            <div class="ns-item">📋 <span>在「日志」中监控机器人运行状态</span></div>
+            <div class="ns-item">🔄 <span>通过控制台「系统设置」检查版本更新</span></div>
+          </div>
+
+          <div class="skills-section" v-if="updatableSkills.length">
+            <h3>可更新的 Skills（{{ updatableSkills.length }}）</h3>
+            <div class="skill-list">
+              <div class="skill-row" v-for="s in updatableSkills" :key="s.name">
+                <span>{{ s.name }}</span>
+                <span class="version">{{ s.current_version }} → {{ s.latest_version }}</span>
+              </div>
+            </div>
+            <button class="btn-primary" @click="updateAll" :disabled="updating">
+              {{ updating ? "更新中…" : "全部更新" }}
+            </button>
           </div>
         </div>
-        <button class="btn-primary" @click="updateAll" :disabled="updating">
-          {{ updating ? "更新中…" : "全部更新" }}
-        </button>
+
+        <!-- 免费 Skills Tab -->
+        <div v-if="activeTab === 'free'" class="skills-grid">
+          <div v-if="license.loading" class="loading-text">加载中…</div>
+          <SkillCard
+            v-for="skill in license.freeSkills"
+            :key="skill.slug"
+            :skill="skill"
+            :is-installed="true"
+            :has-access="true"
+            :operating="false"
+          />
+          <div v-if="!license.loading && license.freeSkills.length === 0" class="empty-text">
+            暂无免费 Skills 数据，请检查网络连接
+          </div>
+        </div>
+
+        <!-- 付费 Skills Tab -->
+        <div v-if="activeTab === 'paid'" class="skills-grid">
+          <div v-if="license.loading" class="loading-text">加载中…</div>
+          <SkillCard
+            v-for="skill in license.paidSkills"
+            :key="skill.slug"
+            :skill="skill"
+            :is-installed="license.installedPaidSlugs.includes(skill.slug)"
+            :has-access="license.canAccessSkill(skill.slug)"
+            :operating="operatingSlug === skill.slug"
+            @install="installSkill"
+            @uninstall="uninstallSkill"
+            @purchase="purchaseSkill"
+          />
+          <div v-if="!license.loading && license.paidSkills.length === 0" class="empty-text">
+            暂无付费 Skills
+          </div>
+        </div>
+
+        <!-- 已购 Tab -->
+        <div v-if="activeTab === 'purchased'" class="skills-grid">
+          <SkillCard
+            v-for="skill in purchasedSkills"
+            :key="skill.slug"
+            :skill="skill"
+            :is-installed="license.installedPaidSlugs.includes(skill.slug)"
+            :has-access="true"
+            :operating="operatingSlug === skill.slug"
+            @install="installSkill"
+            @uninstall="uninstallSkill"
+          />
+          <div v-if="purchasedSkills.length === 0" class="empty-text">
+            {{ license.isAuthenticated ? '尚未购买任何 Skills' : '请先登录查看已购内容' }}
+          </div>
+        </div>
       </div>
 
       <div class="feedback">
         <a href="https://github.com/openclaw/openclaw/issues" target="_blank">🐛 反馈问题</a>
       </div>
+
+      <!-- 弹窗 -->
+      <LoginModal v-if="showLogin" @close="showLogin = false" @success="onLoginSuccess" />
+      <PaymentModal
+        v-if="showPayment"
+        :title="paymentTitle"
+        :plan="paymentPlan"
+        :skill-slug="paymentSlug"
+        @close="showPayment = false"
+        @success="onPaymentSuccess"
+      />
     </div>
   </WizardLayout>
 </template>
@@ -74,14 +177,30 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import WizardLayout from "@/components/WizardLayout.vue";
+import SkillCard from "@/components/SkillCard.vue";
+import LoginModal from "@/components/LoginModal.vue";
+import PaymentModal from "@/components/PaymentModal.vue";
 import { useWizardStore } from "@/stores/wizard";
 import { useConfigStore } from "@/stores/config";
+import { useLicenseStore, type SkillEntry } from "@/stores/license";
 import { tauri, type SkillInfo } from "@/composables/useTauri";
 
 const wizard = useWizardStore();
 const config = useConfigStore();
+const license = useLicenseStore();
+
 const updatableSkills = ref<SkillInfo[]>([]);
 const updating = ref(false);
+const activeTab = ref<"overview" | "free" | "paid" | "purchased">("overview");
+const operatingSlug = ref<string | null>(null);
+
+// 弹窗状态
+const showLogin = ref(false);
+const showPayment = ref(false);
+const showUpgrade = ref(false);
+const paymentTitle = ref("");
+const paymentPlan = ref("");
+const paymentSlug = ref<string | undefined>(undefined);
 
 // 服务状态
 const serviceState = ref<"running" | "stopped" | "unknown">("unknown");
@@ -91,19 +210,39 @@ const serviceStateText = computed(() => ({
   unknown: "状态检测中…",
 }[serviceState.value]));
 
+// Tab 配置
+const tabs = computed(() => [
+  { key: "overview" as const, label: "概览", count: undefined },
+  { key: "free" as const, label: "免费", count: license.freeSkills.length || undefined },
+  { key: "paid" as const, label: "付费", count: license.paidSkills.length || undefined },
+  { key: "purchased" as const, label: "已购", count: purchasedSkills.value.length || undefined },
+]);
+
+// 已购 Skills = 付费列表中有权访问的
+const purchasedSkills = computed(() =>
+  license.paidSkills.filter((s) => license.canAccessSkill(s.slug))
+);
+
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(async () => {
-  // 通知托盘刷新（部署刚完成）
   tauri.notifyDeployDone().catch(() => {});
 
-  // 加载技能列表
-  try {
-    const skills = await tauri.listSkills(config.installPath);
-    updatableSkills.value = skills.filter((s) => s.update_available);
-  } catch { /* 忽略 */ }
+  // 并行加载
+  const [skillsResult] = await Promise.allSettled([
+    tauri.listSkills(config.installPath),
+    license.loadStatus(),
+    license.loadSkillIndex(),
+    license.loadInstalledPaid(),
+  ]);
 
-  // 轮询服务状态（每 10s 一次）
+  // 自动刷新过期的付费 skill 缓存
+  license.refreshExpiredSkills(config.installPath).catch(() => {});
+  if (skillsResult.status === "fulfilled") {
+    updatableSkills.value = skillsResult.value.filter((s) => s.update_available);
+  }
+
+  // 轮询服务状态
   const poll = async () => {
     serviceState.value = await tauri.serviceStatus().catch(() => "unknown" as const);
   };
@@ -144,13 +283,59 @@ async function updateAll() {
   }
 }
 
+async function installSkill(slug: string) {
+  operatingSlug.value = slug;
+  try {
+    await license.installPaidSkill(config.installPath, slug);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  } finally {
+    operatingSlug.value = null;
+  }
+}
+
+async function uninstallSkill(slug: string) {
+  operatingSlug.value = slug;
+  try {
+    await license.uninstallPaidSkill(slug);
+  } finally {
+    operatingSlug.value = null;
+  }
+}
+
+function purchaseSkill(skill: SkillEntry) {
+  if (!license.isAuthenticated) {
+    showLogin.value = true;
+    return;
+  }
+  paymentTitle.value = `购买 ${skill.name}`;
+  paymentPlan.value = "pro_single";
+  paymentSlug.value = skill.slug;
+  showPayment.value = true;
+}
+
+function onLoginSuccess() {
+  license.loadSkillIndex();
+  license.loadInstalledPaid();
+}
+
+function onPaymentSuccess() {
+  showPayment.value = false;
+  license.loadSkillIndex();
+  license.loadInstalledPaid();
+}
+
+async function doLogout() {
+  await license.logout();
+}
+
 function copyText(text: string) {
   navigator.clipboard.writeText(text).catch(() => {});
 }
 </script>
 
 <style scoped>
-.finish-page { display: flex; flex-direction: column; gap: 20px; }
+.finish-page { display: flex; flex-direction: column; gap: 16px; }
 .warn-banner {
   background: #fffbeb; border: 1px solid #fde68a;
   border-radius: var(--radius); padding: 12px 16px;
@@ -171,17 +356,6 @@ h2 { font-size: 24px; font-weight: 700; margin-top: 8px; }
 .copy-btn { padding: 2px 8px; font-size: 11px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 4px; }
 .action-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
 .btn-primary { padding: 10px 24px; font-size: 15px; }
-.skills-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
-.skill-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
-.skill-row { display: flex; justify-content: space-between; font-size: 13px; }
-.version { color: var(--color-muted); }
-.next-steps {
-  background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: var(--radius); padding: 14px 16px;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.ns-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-.ns-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #475569; }
 .btn-tray {
   padding: 10px 20px; font-size: 14px;
   border: 1px solid var(--color-border); border-radius: var(--radius);
@@ -190,6 +364,7 @@ h2 { font-size: 24px; font-weight: 700; margin-top: 8px; }
 }
 .btn-tray:hover { background: var(--color-bg); }
 
+/* 服务状态 */
 .service-status {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px; border-radius: var(--radius);
@@ -208,6 +383,83 @@ h2 { font-size: 24px; font-weight: 700; margin-top: 8px; }
   background: transparent; cursor: pointer; color: inherit;
 }
 .btn-restart:hover { background: rgba(0,0,0,.06); }
+
+/* 许可证状态栏 */
+.license-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: var(--radius);
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  font-size: 13px;
+}
+.plan-badge {
+  padding: 2px 10px; border-radius: 10px;
+  font-size: 11px; font-weight: 600;
+}
+.plan-badge.free { background: #f0fdf4; color: #166534; }
+.plan-badge.pro_single, .plan-badge.pro_all { background: #fffbeb; color: #92400e; }
+.plan-badge.enterprise { background: #eff6ff; color: #1d4ed8; }
+.auth-mode-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  background: #dbeafe; color: #1e40af;
+}
+.auth-mode-tag.device { background: #fef3c7; color: #92400e; }
+.license-info { flex: 1; color: var(--color-muted); }
+.grace-warn { color: var(--color-warning); font-weight: 500; }
+.license-hint { flex: 1; color: var(--color-muted); }
+.btn-sm-link {
+  background: none; border: none; color: var(--color-primary);
+  font-size: 12px; cursor: pointer; padding: 2px 4px;
+}
+.btn-sm-link:hover { text-decoration: underline; }
+.btn-sm-link.logout { color: var(--color-muted); }
+
+/* Tab 导航 */
+.tab-bar {
+  display: flex; gap: 0; border-bottom: 2px solid var(--color-border);
+}
+.tab-btn {
+  padding: 8px 16px; font-size: 13px; font-weight: 500;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  margin-bottom: -2px; cursor: pointer;
+  color: var(--color-muted);
+  transition: color .15s, border-color .15s;
+}
+.tab-btn:hover { color: var(--color-text); }
+.tab-btn.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+.tab-count {
+  display: inline-block; min-width: 18px; text-align: center;
+  padding: 0 5px; margin-left: 4px;
+  font-size: 10px; font-weight: 600;
+  background: var(--color-bg); border-radius: 8px;
+  color: var(--color-muted);
+}
+
+/* Tab 内容 */
+.tab-content { min-height: 200px; }
+
+/* 概览 */
+.next-steps {
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius); padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ns-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.ns-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #475569; }
+.skills-section { margin-top: 12px; }
+.skills-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+.skill-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.skill-row { display: flex; justify-content: space-between; font-size: 13px; }
+.version { color: var(--color-muted); }
+
+/* Skills 网格 */
+.skills-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px; padding-top: 12px;
+}
+.loading-text, .empty-text {
+  grid-column: 1 / -1; text-align: center;
+  padding: 32px 0; color: var(--color-muted); font-size: 13px;
+}
 
 .feedback { text-align: center; font-size: 13px; }
 .feedback a { color: var(--color-muted); }

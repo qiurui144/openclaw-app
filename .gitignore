@@ -59,3 +59,10 @@ appimage-build/
 *.AppImage.zsync
 AppImageBuilder.yml
 .playwright-mcp/
+
+# ── License keys (private key must not be committed) ─────────
+src-tauri/keys/license_priv.pem
+
+# ── License server data ─────────────────────────────────────
+services/license-server/data/
+services/license-server/node_modules/

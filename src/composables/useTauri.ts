@@ -30,6 +30,15 @@ export interface DeployMeta {
   service_port: number;
 }
 
+export interface LicenseStatusDto {
+  authenticated: boolean;
+  plan: string;
+  user_id: string | null;
+  skills: string[];
+  expires_at: string | null;
+  in_grace_period: boolean;
+}
+
 export const tauri = {
   runSystemCheck: () => invoke<CheckItem[]>("run_system_check"),
   loadSession: () => invoke<{ install_path: string; source_mode: string } | null>("load_session"),
@@ -55,6 +64,11 @@ export const tauri = {
   serviceStart: () => invoke<void>("service_start"),
   serviceStop: () => invoke<void>("service_stop"),
   notifyDeployDone: () => invoke<void>("notify_deploy_done"),
+  // 公众号激活
+  checkActivationStatus: () => invoke<boolean>("check_activation_status"),
+  requestActivationQr: () => invoke<{ ticket: string; qr_url: string; expires_in: number }>("request_activation_qr"),
+  pollActivation: (ticket: string) => invoke<{ verified: boolean; expired?: boolean; activation_token?: string }>("poll_activation", { ticket }),
+  getClientId: () => invoke<string>("get_client_id"),
 };
 
 export function useDeployEvents(

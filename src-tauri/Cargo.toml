@@ -37,6 +37,11 @@ open = "5"
 sysinfo = "0.30"
 zip = "2"
 libc = "0.2"
+hostname = "0.4"
+mac_address = "1"
+base64 = "0.22"
+jsonwebtoken = "9"
+ring = "0.17"
 
 tauri = { version = "2", features = ["tray-icon"] }
 
