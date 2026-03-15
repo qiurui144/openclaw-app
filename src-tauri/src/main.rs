@@ -22,8 +22,14 @@ async fn start_deploy(
     config: deploy::DeployConfigDto,
     window: tauri::Window,
 ) -> Result<(), String> {
+    eprintln!("[deploy] === start_deploy command invoked ===");
+    eprintln!("[deploy] source_mode: {:?}", config.source_mode);
+    eprintln!("[deploy] install_path: {}", config.install_path);
     let cfg = deploy::DeployConfig::from(config);
-    deploy::do_deploy_direct(cfg, &window).await.map_err(|e| e.to_string())
+    eprintln!("[deploy] DTO conversion OK, calling do_deploy_direct...");
+    let result = deploy::do_deploy_direct(cfg, &window).await;
+    eprintln!("[deploy] do_deploy_direct returned: {:?}", result.as_ref().map(|_| "Ok").map_err(|e| e.to_string()));
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

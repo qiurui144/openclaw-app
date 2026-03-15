@@ -115,9 +115,12 @@ pub async fn do_deploy_direct(config: DeployConfig, window: &Window) -> Result<(
 
 async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     const TOTAL: u32 = 11;
+    eprintln!("[deploy] do_deploy START, install_path={}", config.install_path);
 
     // Step 1: 创建安装目录
+    eprintln!("[deploy] step 1: emit_progress...");
     emit_progress(window, 1, TOTAL, "创建安装目录…");
+    eprintln!("[deploy] step 1: emit_progress done");
     let _ = window.emit("deploy:log", format!("安装路径: {}", config.install_path));
     std::fs::create_dir_all(&config.install_path)?;
     let _ = window.emit("deploy:log", "目录创建完成");
