@@ -67,13 +67,14 @@ export function activationRoutes(router) {
       return;
     }
 
-    if (row.status === "verified" || row.status === "consumed") {
+    if (row.status === "verified") {
+      // 签发一次后立即标记为 consumed，后续轮询不再签发
       const activationToken = signActivationToken(row.openid, row.client_id);
-      // 首次签发后标记为 consumed
-      if (row.status === "verified") {
-        db.prepare("UPDATE activation_tickets SET status = 'consumed' WHERE ticket = ?").run(ticket);
-      }
+      db.prepare("UPDATE activation_tickets SET status = 'consumed' WHERE ticket = ?").run(ticket);
       ctx.body = { verified: true, activation_token: activationToken };
+    } else if (row.status === "consumed") {
+      // 已签发，告知客户端验证已完成（不再签发新 token）
+      ctx.body = { verified: true, consumed: true };
     } else {
       ctx.body = { verified: false, expired: false };
     }

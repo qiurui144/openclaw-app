@@ -23,13 +23,15 @@ import { getDb } from "./db.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Key Encryption Key — 保护存储在数据库中的主密钥
-const KEK_SOURCE = process.env.KEY_ENCRYPTION_KEY;
+const KEK_SOURCE = process.env.KEY_ENCRYPTION_KEY || process.env.ADMIN_KEY;
 if (!KEK_SOURCE) {
+  console.error("[keymanager] 致命错误：KEY_ENCRYPTION_KEY 和 ADMIN_KEY 均未设置，无法保护密钥存储");
+  process.exit(1);
+}
+if (!process.env.KEY_ENCRYPTION_KEY) {
   console.warn("[keymanager] 警告：未设置 KEY_ENCRYPTION_KEY，使用 ADMIN_KEY 作为 KEK（生产环境务必单独配置）");
 }
-const KEK = crypto.createHash("sha256")
-  .update(KEK_SOURCE || process.env.ADMIN_KEY || "")
-  .digest();
+const KEK = crypto.createHash("sha256").update(KEK_SOURCE).digest();
 
 // ── 表初始化 ────────────────────────────────────────────────
 

@@ -103,7 +103,7 @@ export const useConfigStore = defineStore("config", () => {
       domain_name: domainName.value,
       install_service: installService.value,
       start_on_boot: startOnBoot.value,
-      source_mode: { type: "bundled" },
+      source_mode: { type: "bundled" },  // 占位值，由 DeploymentPage.buildSourceMode() 覆盖
       wecom_config: wecomEnabled.value && wecomCorpId.value && wecomCorpSecret.value && wecomAgentId.value
         ? { corp_id: wecomCorpId.value, corp_secret: wecomCorpSecret.value, agent_id: wecomAgentId.value }
         : null,

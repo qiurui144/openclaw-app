@@ -75,14 +75,13 @@ onMounted(async () => {
   };
   try {
     await tauri.startDeploy(dto);
-    wizard.setDeployStatus("done");
-    tauri.clashStop().catch(() => {});
-    goTo("finish");
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    wizard.setDeployStatus("failed");
-    errorReason.value = msg;
-    tauri.clashStop().catch(() => {});
+    if (wizard.deployStatus !== "failed") {
+      const msg = e instanceof Error ? e.message : String(e);
+      wizard.setDeployStatus("failed");
+      errorReason.value = msg;
+      tauri.clashStop().catch(() => {});
+    }
   }
 });
 

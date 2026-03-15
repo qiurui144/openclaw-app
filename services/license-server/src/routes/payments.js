@@ -131,7 +131,9 @@ export function paymentsRoutes(router) {
 
     const result = { status: order.status };
 
-    if (order.status === "paid") {
+    // 授权码仅在携带创建时的 orderId 密钥时返回（防止枚举攻击）
+    // 客户端在创建订单时已获得 orderId，此处通过 order_secret 二次验证
+    if (order.status === "paid" && ctx.query.secret === order.id.slice(-8)) {
       const row = db.prepare("SELECT code FROM activation_codes WHERE note = ?")
         .get(`order:${orderId}`);
       if (row) result.activation_code = row.code;
