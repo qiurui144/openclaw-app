@@ -30,10 +30,14 @@ else
   echo "Linux Node.js 已存在（$(du -sh "$RESOURCES_DIR/linux/node" | cut -f1)），跳过"
 fi
 
+MACOS_NODE_ARCH="${MACOS_NODE_ARCH:-arm64}"
 if [[ ! -f "$RESOURCES_DIR/macos/node" ]] || [[ $(stat -c%s "$RESOURCES_DIR/macos/node" 2>/dev/null || echo 0) -lt 1000000 ]]; then
-  echo "下载 macOS Node.js ${NODE_VERSION} (arm64)..."
-  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz" \
-    | tar -xz --strip-components=2 -C "$RESOURCES_DIR/macos" "node-v${NODE_VERSION}-darwin-arm64/bin/node"
+  # arm64 → darwin-arm64，x86_64 → darwin-x64
+  NODE_ARCH_SUFFIX="$MACOS_NODE_ARCH"
+  if [[ "$MACOS_NODE_ARCH" == "x86_64" ]]; then NODE_ARCH_SUFFIX="x64"; fi
+  echo "下载 macOS Node.js ${NODE_VERSION} (${MACOS_NODE_ARCH})..."
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-${NODE_ARCH_SUFFIX}.tar.gz" \
+    | tar -xz --strip-components=2 -C "$RESOURCES_DIR/macos" "node-v${NODE_VERSION}-darwin-${NODE_ARCH_SUFFIX}/bin/node"
   chmod +x "$RESOURCES_DIR/macos/node"
 else
   echo "macOS Node.js 已存在（$(du -sh "$RESOURCES_DIR/macos/node" | cut -f1)），跳过"
@@ -127,9 +131,11 @@ else
   echo "Windows Mihomo 已存在，跳过"
 fi
 
+MACOS_MIHOMO_ARCH="${MACOS_NODE_ARCH:-arm64}"
+if [[ "$MACOS_MIHOMO_ARCH" == "x86_64" ]]; then MACOS_MIHOMO_ARCH="amd64"; fi
 if [[ ! -f "$RESOURCES_DIR/macos/mihomo" ]] || [[ $(stat -c%s "$RESOURCES_DIR/macos/mihomo" 2>/dev/null || echo 0) -lt 1000000 ]]; then
-  echo "下载 macOS Mihomo ${MIHOMO_VERSION} (arm64)..."
-  curl -fsSL "${MIHOMO_BASE_URL}/mihomo-darwin-arm64-v${MIHOMO_VERSION}.gz" -o /tmp/mihomo_mac.gz
+  echo "下载 macOS Mihomo ${MIHOMO_VERSION} (${MACOS_MIHOMO_ARCH})..."
+  curl -fsSL "${MIHOMO_BASE_URL}/mihomo-darwin-${MACOS_MIHOMO_ARCH}-v${MIHOMO_VERSION}.gz" -o /tmp/mihomo_mac.gz
   gunzip -f /tmp/mihomo_mac.gz
   mv /tmp/mihomo_mac "$RESOURCES_DIR/macos/mihomo"
   chmod +x "$RESOURCES_DIR/macos/mihomo"
