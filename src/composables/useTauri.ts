@@ -26,7 +26,7 @@ export interface ClashTestResult {
 export interface DeployMeta {
   version: string;
   install_path: string;
-  installed_at: string;
+  deployed_at: string;
   service_port: number;
 }
 

@@ -26,10 +26,14 @@ resources/binaries/linux/node
 resources/binaries/linux/openclaw.tgz
 resources/binaries/windows/node.exe
 resources/binaries/windows/openclaw.tgz
+resources/binaries/macos/node
+resources/binaries/macos/openclaw.tgz
+resources/binaries/macos/mihomo
 # 保留占位说明文件
 !resources/binaries/README.md
 !resources/binaries/linux/.gitkeep
 !resources/binaries/windows/.gitkeep
+!resources/binaries/macos/.gitkeep
 
 # ── IDE ───────────────────────────────────────────────────────
 .idea/

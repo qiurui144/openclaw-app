@@ -75,14 +75,15 @@ onMounted(async () => {
   };
   try {
     await tauri.startDeploy(dto);
-    wizard.setDeployStatus("done");
-    tauri.clashStop().catch(() => {});
-    goTo("finish");
+    // 成功/失败由 deploy:done / deploy:failed 事件处理，此处不重复跳转
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    wizard.setDeployStatus("failed");
-    errorReason.value = msg;
-    tauri.clashStop().catch(() => {});
+    // IPC 调用失败（非部署逻辑错误）时的兜底
+    if (wizard.deployStatus !== "failed") {
+      const msg = e instanceof Error ? e.message : String(e);
+      wizard.setDeployStatus("failed");
+      errorReason.value = msg;
+      tauri.clashStop().catch(() => {});
+    }
   }
 });
 

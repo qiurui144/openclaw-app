@@ -943,15 +943,18 @@ fn build_client(proxy: Option<&str>) -> Result<reqwest::Client> {
 
 /// 探测 npm registry 和 nodejs.org 连通性（3 秒超时，不阻塞部署）
 async fn probe_connectivity(proxy: Option<&str>) -> bool {
-    let client = match build_client(proxy) {
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3));
+    if let Some(p) = proxy {
+        if let Ok(px) = reqwest::Proxy::all(p) {
+            builder = builder.proxy(px);
+        }
+    }
+    let client = match builder.build() {
         Ok(c) => c,
         Err(_) => return false,
     };
-    let probe = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .unwrap_or(client);
-    probe.head("https://registry.npmmirror.com/openclaw")
+    client.head("https://registry.npmmirror.com/openclaw")
         .send().await
         .map(|r| r.status().is_success())
         .unwrap_or(false)
