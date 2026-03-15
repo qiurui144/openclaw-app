@@ -14,6 +14,7 @@ pub struct SkillInfo {
 pub fn list_installed(install_path: &str) -> Vec<SkillInfo> {
     let modules = PathBuf::from(install_path)
         .join("openclaw_pkg")
+        .join("package")
         .join("node_modules");
 
     let scope_dir = modules.join("@openclaw");
@@ -81,10 +82,15 @@ pub async fn update_skill(
         builder = builder.proxy(reqwest::Proxy::all(proxy)?);
     }
     let client = builder.build()?;
-    let bytes = client.get(&url).send().await?.bytes().await?;
+    let resp = client.get(&url).send().await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("下载 {} v{} 失败，HTTP {}", skill_name, version, resp.status());
+    }
+    let bytes = resp.bytes().await?;
 
     let modules = PathBuf::from(install_path)
         .join("openclaw_pkg")
+        .join("package")
         .join("node_modules");
     let tmp_dir = PathBuf::from(install_path)
         .join(".tmp")
@@ -141,9 +147,16 @@ pub async fn reload_skills_windows(port: u16, admin_password: &str) -> Result<()
 pub fn send_reload_signal(install_path: &str) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("systemctl")
-            .args(["--user", "kill", "-s", "HUP", "openclaw.service"])
-            .status()?;
+        let elevated = crate::system_check::is_elevated();
+        if elevated {
+            std::process::Command::new("systemctl")
+                .args(["kill", "-s", "HUP", "openclaw.service"])
+                .status()?;
+        } else {
+            std::process::Command::new("systemctl")
+                .args(["--user", "kill", "-s", "HUP", "openclaw.service"])
+                .status()?;
+        }
     }
     #[cfg(target_os = "macos")]
     {
@@ -193,6 +206,7 @@ mod tests {
             .join(format!("oc_skills_test_{}", std::process::id()));
         let skill_dir = tmp
             .join("openclaw_pkg")
+            .join("package")
             .join("node_modules")
             .join("@openclaw")
             .join("feishu");
