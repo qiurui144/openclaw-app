@@ -239,35 +239,47 @@ export function codesRoutes(router) {
     };
   });
 
-  // ── 管理接口：查看设备绑定列表 ─────────────────────────
-  router.get("/admin/users/:userId/devices", async (ctx) => {
+  // ── 管理接口：更新客户配置（微信公众号等）────────────────
+  router.post("/admin/clients", async (ctx) => {
     const adminKey = ctx.get("X-Admin-Key");
     if (adminKey !== process.env.ADMIN_KEY) {
       ctx.throw(403, "管理员密钥无效");
     }
 
-    const db = getDb();
-    const devices = db.prepare("SELECT * FROM user_devices WHERE user_id = ? ORDER BY bound_at DESC")
-      .all(ctx.params.userId);
-
-    ctx.body = { devices };
-  });
-
-  // ── 管理接口：解绑设备 ────────────────────────────────
-  router.delete("/admin/devices/:deviceId", async (ctx) => {
-    const adminKey = ctx.get("X-Admin-Key");
-    if (adminKey !== process.env.ADMIN_KEY) {
-      ctx.throw(403, "管理员密钥无效");
+    const { id, name, wechat_appid, wechat_secret, wechat_token, license_api, branding } = ctx.request.body;
+    if (!id) {
+      ctx.throw(400, "客户 id 为必填");
     }
 
     const db = getDb();
-    const result = db.prepare("DELETE FROM user_devices WHERE id = ?")
-      .run(ctx.params.deviceId);
-
-    if (result.changes === 0) {
-      ctx.throw(404, "设备记录不存在");
-    }
+    db.prepare(`
+      INSERT INTO clients (id, name, wechat_appid, wechat_secret, wechat_token, license_api, branding)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = COALESCE(excluded.name, clients.name),
+        wechat_appid = COALESCE(excluded.wechat_appid, clients.wechat_appid),
+        wechat_secret = COALESCE(excluded.wechat_secret, clients.wechat_secret),
+        wechat_token = COALESCE(excluded.wechat_token, clients.wechat_token),
+        license_api = COALESCE(excluded.license_api, clients.license_api),
+        branding = COALESCE(excluded.branding, clients.branding)
+    `).run(id, name || id, wechat_appid || null, wechat_secret || null, wechat_token || null, license_api || null, branding ? JSON.stringify(branding) : null);
 
     ctx.body = { ok: true };
+  });
+
+  // ── 管理接口：查看审计日志 ──────────────────────────────
+  router.get("/admin/audit", async (ctx) => {
+    const adminKey = ctx.get("X-Admin-Key");
+    if (adminKey !== process.env.ADMIN_KEY) {
+      ctx.throw(403, "管理员密钥无效");
+    }
+
+    const db = getDb();
+    const { limit = 50, offset = 0 } = ctx.query;
+    const logs = db.prepare(
+      "SELECT * FROM admin_audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    ).all(Number(limit), Number(offset));
+
+    ctx.body = { logs };
   });
 }
