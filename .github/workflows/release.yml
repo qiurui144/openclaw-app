@@ -178,55 +178,75 @@ jobs:
           path: _artifacts/windows/*.exe
 
   build-macos:
-    name: Build macOS Bundle
+    name: Build macOS (${{ matrix.arch }})
     runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装打包依赖
-        run: brew install coreutils
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-      - name: 安装 Node.js
-        uses: actions/setup-node@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
 
-      - name: 下载 openclaw.tgz
+      - run: npm ci
+
+      - name: 构建 Lite
+        run: npm run tauri build -- --target ${{ matrix.target }}
+        env:
+          OC_BUILD_BUNDLED: "0"
+          OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
+          APPLE_SIGNING_IDENTITY: "-"
+
+      - name: 暂存 Lite DMG
         run: |
-          mkdir -p resources
-          OC_VERSION=$(npm view openclaw version --registry https://registry.npmmirror.com 2>/dev/null || npm view openclaw version)
-          OC_URL=$(npm view "openclaw@${OC_VERSION}" dist.tarball --registry https://registry.npmmirror.com 2>/dev/null || npm view "openclaw@${OC_VERSION}" dist.tarball)
-          echo "下载 openclaw@${OC_VERSION}: ${OC_URL}"
-          curl -fL "$OC_URL" -o resources/openclaw.tgz
+          mkdir -p _artifacts/macos
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            cp "$f" "_artifacts/macos/$(basename ${f%.dmg})-${{ matrix.arch }}-lite.dmg"
+          done
+          ls -lh _artifacts/macos/
 
-      - name: 打包 macOS Full Bundle (arm64)
-        run: bash scripts/macos/build_bundle.sh
-        env:
-          NODE_ARCH: arm64
-          OUT_DIR: dist/macos
-
-      - name: 打包 macOS Full Bundle (x86_64)
-        run: bash scripts/macos/build_bundle.sh
-        env:
-          NODE_ARCH: x86_64
-          OUT_DIR: dist/macos/x64
-
-      - name: 打包 ZIP
-        env:
-          TAG: ${{ github.ref_name }}
+      - name: 获取内嵌资源
         run: |
-          # 将辅助脚本同时复制到两个目录
-          cp scripts/macos/detect.sh scripts/macos/service.sh scripts/macos/clash.sh dist/macos/
-          cp scripts/macos/detect.sh scripts/macos/service.sh scripts/macos/clash.sh dist/macos/x64/
-          cd dist/macos
-          zip -r "../../openclaw-wizard-${TAG}-macos-arm64.zip" install.command detect.sh service.sh clash.sh
-          cd x64
-          zip -r "../../../openclaw-wizard-${TAG}-macos-x64.zip" install.command detect.sh service.sh clash.sh
+          chmod +x scripts/fetch_resources.sh
+          bash scripts/fetch_resources.sh
+        env:
+          NODE_VERSION: "22.17.0"
+          RESOURCES_DIR: resources/binaries
+          MACOS_NODE_ARCH: ${{ matrix.arch }}
+
+      - name: 构建 Full Bundle
+        run: npm run tauri build -- --target ${{ matrix.target }} --features bundled
+        env:
+          OC_BUILD_BUNDLED: "1"
+          OC_UPDATE_URL: ${{ secrets.OC_UPDATE_URL }}
+          APPLE_SIGNING_IDENTITY: "-"
+
+      - name: 暂存 Full Bundle DMG
+        run: |
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            cp "$f" "_artifacts/macos/$(basename ${f%.dmg})-${{ matrix.arch }}-full.dmg"
+          done
+          ls -lh _artifacts/macos/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-bundle
-          path: "*.zip"
+          name: macos-dmg-${{ matrix.arch }}
+          path: _artifacts/macos/*.dmg
 
   publish:
     name: Publish Release
@@ -259,8 +279,10 @@ jobs:
             | Linux (x64) | Full Bundle（离线） | `*-linux-x64-full.AppImage` |
             | Windows 10/11 | Lite（在线） | `*-windows-lite.exe` |
             | Windows 10/11 | Full Bundle（离线） | `*-windows-full.exe` |
-            | macOS (Apple Silicon) | 一键脚本 | `*-macos-arm64.zip` |
-            | macOS (Intel) | 一键脚本 | `*-macos-x64.zip` |
+            | macOS (Apple Silicon) | Lite（在线） | `*-arm64-lite.dmg` |
+            | macOS (Apple Silicon) | Full Bundle（离线） | `*-arm64-full.dmg` |
+            | macOS (Intel) | Lite（在线） | `*-x86_64-lite.dmg` |
+            | macOS (Intel) | Full Bundle（离线） | `*-x86_64-full.dmg` |
 
             ### 最低系统要求
             - Linux: Ubuntu 22.04+（glibc >= 2.35）
