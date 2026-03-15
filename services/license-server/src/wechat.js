@@ -1,18 +1,19 @@
 import crypto from "crypto";
 import { readFileSync } from "fs";
 
-let cachedToken = null;
-let tokenExpiresAt = 0;
+// 按 appid 缓存 access_token（支持多客户）
+const tokenCache = new Map();
 
 /**
- * 获取微信 access_token（自动缓存，2 小时有效）
+ * 获取微信 access_token（按 appid 缓存，2 小时有效）
  * @param {string} appid
  * @param {string} secret
  * @returns {Promise<string>}
  */
 export async function getAccessToken(appid, secret) {
-  if (cachedToken && Date.now() < tokenExpiresAt) {
-    return cachedToken;
+  const cached = tokenCache.get(appid);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.token;
   }
 
   const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${appid}&secret=${secret}`;
@@ -23,10 +24,12 @@ export async function getAccessToken(appid, secret) {
     throw new Error(`微信 access_token 获取失败: ${data.errmsg} (${data.errcode})`);
   }
 
-  cachedToken = data.access_token;
   // 提前 5 分钟过期，避免边界条件
-  tokenExpiresAt = Date.now() + (data.expires_in - 300) * 1000;
-  return cachedToken;
+  tokenCache.set(appid, {
+    token: data.access_token,
+    expiresAt: Date.now() + (data.expires_in - 300) * 1000,
+  });
+  return data.access_token;
 }
 
 /**

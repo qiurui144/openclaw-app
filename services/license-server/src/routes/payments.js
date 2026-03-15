@@ -58,9 +58,14 @@ function completeOrder(db, orderId, order) {
 
   const code = doComplete();
 
-  // 一授权一生成：为授权码生成独立主密钥
+  // 一授权一生成：为授权码生成独立主密钥（generateMasterKey 内部有事务保护）
   const activationId = `pay_${orderId}`;
-  generateMasterKey(activationId);
+  try {
+    generateMasterKey(activationId);
+  } catch (e) {
+    console.error(`[支付] 主密钥生成失败（订单 ${orderId}）: ${e.message}`);
+    // 密钥生成失败不回滚订单（授权码已可用于兑换，兑换时会重新生成密钥）
+  }
 
   return { code, activationId };
 }
@@ -153,16 +158,19 @@ export function paymentsRoutes(router) {
       ? ctx.request.body
       : JSON.stringify(ctx.request.body);
 
-    // 签名验证（需要微信平台公钥，从证书下载接口获取）
-    // 生产环境务必启用，开发环境可跳过
-    if (process.env.WXPAY_PLATFORM_CERT) {
-      const { readFileSync } = await import("fs");
-      const platformCert = readFileSync(process.env.WXPAY_PLATFORM_CERT, "utf-8");
-      if (!verifyWxPayCallback(wxTimestamp, wxNonce, rawBody, wxSignature, platformCert)) {
-        ctx.status = 401;
-        ctx.body = { code: "FAIL", message: "签名验证失败" };
-        return;
-      }
+    // 签名验证（必须配置微信平台证书，否则拒绝处理）
+    if (!process.env.WXPAY_PLATFORM_CERT) {
+      console.error("[支付回调] 未配置 WXPAY_PLATFORM_CERT，拒绝处理回调");
+      ctx.status = 500;
+      ctx.body = { code: "FAIL", message: "支付回调签名验证未配置" };
+      return;
+    }
+    const { readFileSync } = await import("fs");
+    const platformCert = readFileSync(process.env.WXPAY_PLATFORM_CERT, "utf-8");
+    if (!verifyWxPayCallback(wxTimestamp, wxNonce, rawBody, wxSignature, platformCert)) {
+      ctx.status = 401;
+      ctx.body = { code: "FAIL", message: "签名验证失败" };
+      return;
     }
 
     const body = typeof ctx.request.body === "object" ? ctx.request.body : JSON.parse(rawBody);
@@ -222,8 +230,12 @@ export function paymentsRoutes(router) {
     ctx.body = { code: "SUCCESS", message: "OK" };
   });
 
-  // ── 兼容旧回调格式（简单 JSON）──────────────────────────
+  // ── 兼容旧回调格式（需 ADMIN_KEY 鉴权）─────────────────
   router.post("/payments/callback", async (ctx) => {
+    const adminKey = ctx.get("X-Admin-Key");
+    if (adminKey !== process.env.ADMIN_KEY) {
+      ctx.throw(403, "管理员密钥无效");
+    }
     const { order_id, status } = ctx.request.body;
     if (!order_id || status !== "paid") ctx.throw(400, "无效的回调");
 

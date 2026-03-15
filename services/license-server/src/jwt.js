@@ -50,6 +50,19 @@ export function verifyToken(token) {
   return jwt.verify(token, getPublicKey(), {
     algorithms: ["RS256"],
     issuer: ISSUER,
+    clockTolerance: 60,
+  });
+}
+
+/**
+ * 宽松验证 JWT（允许过期 7 天内的 token，仅用于 refresh 场景）
+ * @param {string} token
+ * @returns {object} decoded payload
+ */
+export function verifyTokenForRefresh(token) {
+  return jwt.verify(token, getPublicKey(), {
+    algorithms: ["RS256"],
+    issuer: ISSUER,
     clockTolerance: 7 * 86400,
   });
 }

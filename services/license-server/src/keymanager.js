@@ -23,8 +23,12 @@ import { getDb } from "./db.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Key Encryption Key — 保护存储在数据库中的主密钥
+const KEK_SOURCE = process.env.KEY_ENCRYPTION_KEY;
+if (!KEK_SOURCE) {
+  console.warn("[keymanager] 警告：未设置 KEY_ENCRYPTION_KEY，使用 ADMIN_KEY 作为 KEK（生产环境务必单独配置）");
+}
 const KEK = crypto.createHash("sha256")
-  .update(process.env.KEY_ENCRYPTION_KEY || process.env.ADMIN_KEY || "default-kek-change-me")
+  .update(KEK_SOURCE || process.env.ADMIN_KEY || "")
   .digest();
 
 // ── 表初始化 ────────────────────────────────────────────────
@@ -79,23 +83,25 @@ export function getPublicKey() {
 export function generateMasterKey(activationId) {
   const db = getDb();
 
-  // 幂等：已存在则直接返回
-  const existing = db.prepare("SELECT * FROM key_store WHERE activation_id = ?").get(activationId);
-  if (existing && existing.status === "active") {
-    return decryptStoredKey(existing.encrypted_key, existing.key_nonce);
-  }
+  // 事务保护：幂等检查 + 插入原子化，防止并发竞态
+  const doGenerate = db.transaction(() => {
+    const existing = db.prepare("SELECT * FROM key_store WHERE activation_id = ?").get(activationId);
+    if (existing && existing.status === "active") {
+      return decryptStoredKey(existing.encrypted_key, existing.key_nonce);
+    }
 
-  const masterKey = crypto.randomBytes(32);
+    const masterKey = crypto.randomBytes(32);
+    const { ciphertext, nonce } = encryptWithKEK(masterKey);
 
-  // 用 KEK 加密后存储
-  const { ciphertext, nonce } = encryptWithKEK(masterKey);
+    db.prepare(`
+      INSERT OR REPLACE INTO key_store (activation_id, encrypted_key, key_nonce, status)
+      VALUES (?, ?, ?, 'active')
+    `).run(activationId, ciphertext, nonce);
 
-  db.prepare(`
-    INSERT OR REPLACE INTO key_store (activation_id, encrypted_key, key_nonce, status)
-    VALUES (?, ?, ?, 'active')
-  `).run(activationId, ciphertext, nonce);
+    return masterKey;
+  });
 
-  return masterKey;
+  return doGenerate();
 }
 
 /**

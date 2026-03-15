@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { getDb } from "../db.js";
-import { signToken, verifyToken } from "../jwt.js";
+import { signToken, verifyToken, verifyTokenForRefresh } from "../jwt.js";
 
 function generateCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -131,7 +131,7 @@ export function authRoutes(router) {
 
     let decoded;
     try {
-      decoded = verifyToken(oldToken);
+      decoded = verifyTokenForRefresh(oldToken);
     } catch (e) {
       ctx.throw(401, `令牌验证失败：${e.message}`);
     }

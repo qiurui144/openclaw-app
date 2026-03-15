@@ -68,9 +68,13 @@ export function activationRoutes(router) {
     }
 
     if (row.status === "verified") {
-      // 生成激活 JWT（365 天有效，仅用于证明已关注公众号）
+      // 签发一次后标记为 consumed，防止重复签发
       const activationToken = signActivationToken(row.openid, row.client_id);
+      db.prepare("UPDATE activation_tickets SET status = 'consumed' WHERE ticket = ?").run(ticket);
       ctx.body = { verified: true, activation_token: activationToken };
+    } else if (row.status === "consumed") {
+      // 已消费的票据不再签发新 token
+      ctx.body = { verified: true, consumed: true };
     } else {
       ctx.body = { verified: false, expired: false };
     }

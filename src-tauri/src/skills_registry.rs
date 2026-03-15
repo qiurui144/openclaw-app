@@ -29,7 +29,7 @@ struct EncryptedContentResp {
     encrypted: bool,
     ciphertext: String,
     nonce: String,
-    watermark_id: String,
+    activation_id: String,
 }
 
 /// 解密密钥响应

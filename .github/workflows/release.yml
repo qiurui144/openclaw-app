@@ -10,9 +10,13 @@ permissions:
 
 jobs:
   build-linux:
-    name: Build Linux AppImage
-    # 使用 22.04 确保 glibc 2.35 兼容 22.04+，24.04 的 glibc 2.39 不兼容 22.04
+    name: Build Linux AppImage (${{ matrix.client.id }})
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        client:
+          - id: default
+            license_api: https://license.openclaw.cn/api
     steps:
       - uses: actions/checkout@v4
 
