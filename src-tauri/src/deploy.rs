@@ -295,6 +295,12 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     let _ = window.emit("deploy:log", "安装预缓存的 Skills…");
     install_bundled_skills(config, window);
 
+    // Step 4.6: 安装必需的插件（如 qqbot）
+    if config.qq_config.is_some() {
+        let _ = window.emit("deploy:log", "安装 QQ Bot 插件（@sliverp/qqbot）…");
+        install_plugin(config, "qqbot", "@sliverp/qqbot", window);
+    }
+
     // Step 5: 写入主配置
     emit_progress(window, 5, TOTAL, "写入配置文件…");
     write_main_config(config)?;
@@ -466,6 +472,33 @@ fn extract_openclaw(config: &DeployConfig, window: &Window) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// 安装 OpenClaw 插件（通过 openclaw plugins install 命令）
+fn install_plugin(config: &DeployConfig, name: &str, pkg: &str, window: &Window) {
+    let node_bin = node_bin_path(&config.install_path);
+    let script = PathBuf::from(&config.install_path)
+        .join("openclaw_pkg").join("package").join("openclaw.mjs");
+    if !node_bin.exists() || !script.exists() {
+        let _ = window.emit("deploy:log", format!("跳过 {} 插件安装（node/openclaw 不可用）", name));
+        return;
+    }
+    let result = std::process::Command::new(&node_bin)
+        .args([script.to_str().unwrap_or_default(), "plugins", "install", pkg])
+        .env("NODE_ENV", "production")
+        .output();
+    match result {
+        Ok(out) if out.status.success() => {
+            let _ = window.emit("deploy:log", format!("{} 插件安装成功", name));
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let _ = window.emit("deploy:log", format!("{} 插件安装失败（非致命）: {}", name, stderr));
+        }
+        Err(e) => {
+            let _ = window.emit("deploy:log", format!("{} 插件安装失败（非致命）: {}", name, e));
+        }
+    }
 }
 
 /// 释放预缓存的官方 Skills 到安装目录（Bundled 模式从内嵌资源，Online 时可选跳过）
