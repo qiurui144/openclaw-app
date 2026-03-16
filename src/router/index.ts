@@ -17,6 +17,8 @@ const routes = [
   { path: "/uninstall",         name: "uninstall",         component: () => import("@/pages/UninstallPage.vue") },
   // 简化配置页面（第二窗口）
   { path: "/simple",            name: "simple",            component: () => import("@/pages/SimpleDashboard.vue") },
+  // catch-all：未匹配路径重定向首页（Tauri webview 直接导航时兜底）
+  { path: "/:pathMatch(.*)*",   redirect: "/" },
 ];
 
 export const router = createRouter({

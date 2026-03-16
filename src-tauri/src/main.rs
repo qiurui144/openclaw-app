@@ -186,9 +186,22 @@ async fn run_uninstall(install_path: String, service_port: Option<u16>) -> Resul
                 detail: format!("安全校验失败：{} 不是有效的 OpenClaw 安装目录（缺少特征文件）", install_path),
             });
         } else {
-            match std::fs::remove_dir_all(&install) {
-                Ok(()) => results.push(UninstallStepResult { step: "删除安装目录".into(), success: true, detail: format!("{} 已删除", install_path) }),
-                Err(e) => results.push(UninstallStepResult { step: "删除安装目录".into(), success: false, detail: e.to_string() }),
+            // 重试删除（Windows 上进程退出后文件句柄释放有延迟）
+            let mut last_err = None;
+            for attempt in 0..3 {
+                match std::fs::remove_dir_all(&install) {
+                    Ok(()) => { last_err = None; break; }
+                    Err(e) => {
+                        last_err = Some(e);
+                        if attempt < 2 {
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        }
+                    }
+                }
+            }
+            match last_err {
+                None => results.push(UninstallStepResult { step: "删除安装目录".into(), success: true, detail: format!("{} 已删除", install_path) }),
+                Some(e) => results.push(UninstallStepResult { step: "删除安装目录".into(), success: false, detail: format!("删除失败（已重试 3 次）: {}", e) }),
             }
         }
     } else {
@@ -515,6 +528,52 @@ fn json_deep_merge(target: &mut serde_json::Value, patch: &serde_json::Value) {
     }
 }
 
+/// 测试 AI 接口连通性（后端代理，避免前端直接持有 API Key）
+#[tauri::command]
+async fn test_ai_connection(base_url: String, api_key: String) -> Result<String, String> {
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| format!("连接失败: {}", e))?;
+    if resp.status().is_success() {
+        Ok("连接成功".into())
+    } else {
+        Err(format!("HTTP {}", resp.status()))
+    }
+}
+
+/// 获取 WebSocket 认证 token（一次性 token，避免前端持有密码）
+/// 返回 Gateway 端口和临时 auth header
+#[tauri::command]
+fn get_chat_auth() -> Result<serde_json::Value, String> {
+    let meta = service_ctrl::read_meta().ok_or("未安装 OpenClaw")?;
+    let config_path = dirs::home_dir()
+        .ok_or("无法获取 home 目录")?
+        .join(".openclaw/openclaw.json");
+    let password = if config_path.exists() {
+        let data = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+        let cfg: serde_json::Value = serde_json::from_str(&data).unwrap_or_default();
+        cfg.get("gateway")
+            .and_then(|g| g.get("auth"))
+            .and_then(|a| a.get("password"))
+            .and_then(|p| p.as_str())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        String::new()
+    };
+    Ok(serde_json::json!({
+        "port": meta.service_port,
+        "password": password,
+    }))
+}
+
 // ── 服务控制命令（供托盘和 FinishPage 使用）──────────────────────────────────
 
 /// 查询 OpenClaw 服务当前状态（"running" / "stopped" / "unknown"）
@@ -750,6 +809,8 @@ fn main() {
             read_openclaw_config,
             write_openclaw_config,
             get_gateway_status,
+            test_ai_connection,
+            get_chat_auth,
             service_status,
             service_start,
             service_stop,

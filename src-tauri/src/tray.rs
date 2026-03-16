@@ -209,8 +209,8 @@ fn open_simple_dashboard(app: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
-    // 动态创建新窗口，加载 /simple/ 路由
-    let url = WebviewUrl::App("/simple/".into());
+    // 动态创建新窗口，加载 /simple 路由（不带尾斜杠，与路由定义一致）
+    let url = WebviewUrl::App("/simple".into());
     match tauri::webview::WebviewWindowBuilder::new(app, "simple", url)
         .title("OpenClaw 配置")
         .inner_size(860.0, 640.0)
