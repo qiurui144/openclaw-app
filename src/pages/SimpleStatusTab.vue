@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from "vue";
 import { tauri } from "@/composables/useTauri";
 
 const status = ref({
@@ -86,6 +86,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   dingtalk: "钉钉",
   feishu: "飞书",
   qq: "QQ",
+  qqbot: "QQ",
   whatsapp: "WhatsApp",
   telegram: "Telegram",
   discord: "Discord",
@@ -113,14 +114,20 @@ async function refresh() {
   } catch { /* ignore */ }
 }
 
+function startPolling() {
+  if (!timer) timer = setInterval(refresh, 10_000);
+}
+function stopPolling() {
+  if (timer) { clearInterval(timer); timer = null; }
+}
+
 onMounted(async () => {
   await refresh();
-  timer = setInterval(refresh, 10_000);
+  startPolling();
 });
-
-onUnmounted(() => {
-  if (timer) clearInterval(timer);
-});
+onUnmounted(() => { stopPolling(); });
+onActivated(() => { refresh(); startPolling(); });
+onDeactivated(() => { stopPolling(); });
 
 function showError(msg: string) {
   errorMsg.value = msg;

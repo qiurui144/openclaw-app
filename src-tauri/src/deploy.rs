@@ -162,8 +162,14 @@ pub fn validate_install_path(path: &str) -> Result<()> {
         anyhow::bail!("安装路径包含非法字符（<>|\"*? 或控制字符）");
     }
 
-    // 规范化路径：清理 .. 和 . 组件，防止 /usr/lib/../../etc 绕过黑名单
-    let normalized = normalize_path(Path::new(trimmed));
+    // 规范化路径：解析符号链接（已存在时）+ 清理 .. 和 . 组件
+    let raw_path = Path::new(trimmed);
+    let normalized = if raw_path.exists() {
+        // 已存在的路径：canonicalize 解析符号链接
+        raw_path.canonicalize().unwrap_or_else(|_| normalize_path(raw_path))
+    } else {
+        normalize_path(raw_path)
+    };
 
     // 黑名单检测（Unix）
     #[cfg(unix)]

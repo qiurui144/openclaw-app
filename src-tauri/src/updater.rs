@@ -146,21 +146,22 @@ pub async fn apply_update(
                 if backup_dir.exists() {
                     std::fs::rename(&backup_dir, &pkg_dir)?;
                 }
-                let _ = start_service();
-                anyhow::bail!("更新后健康检查失败，已回滚到旧版本");
+                let restart_ok = start_service().is_ok();
+                let hint = if restart_ok { "旧版本已重新启动" } else { "旧版本重启失败，请手动启动" };
+                anyhow::bail!("更新后健康检查失败，已回滚。{}", hint);
             }
         }
         Err(e) => {
             let _ = window.emit("update:progress", "启动失败，正在回滚…");
             std::fs::remove_dir_all(&pkg_dir).ok();
             if backup_dir.exists() {
-                // rename 失败不 propagate，避免吞掉原始错误
                 if let Err(re) = std::fs::rename(&backup_dir, &pkg_dir) {
                     eprintln!("[updater] 回滚 rename 失败: {re}");
                 }
             }
-            let _ = start_service();
-            anyhow::bail!("更新失败，已回滚到旧版本: {}", e);
+            let restart_ok = start_service().is_ok();
+            let hint = if restart_ok { "旧版本已重新启动" } else { "旧版本重启失败，请手动启动" };
+            anyhow::bail!("更新失败，已回滚（{}）: {}", hint, e);
         }
     }
 

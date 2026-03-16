@@ -347,6 +347,9 @@ fn get_default_install_path() -> String {
 
 // ── 简化配置页面命令（读写 openclaw.json）──────────────────────────────────
 
+/// 配置文件读写锁（防止并发 read-modify-write 竞态）
+static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// 读取 ~/.openclaw/openclaw.json 完整内容（自动迁移旧格式）
 #[tauri::command]
 fn read_openclaw_config() -> Result<serde_json::Value, String> {
@@ -376,6 +379,7 @@ fn read_openclaw_config() -> Result<serde_json::Value, String> {
 /// 如果文件不存在，自动从 deploy_meta 恢复基础 gateway 配置
 #[tauri::command]
 fn write_openclaw_config(patch: serde_json::Value) -> Result<(), String> {
+    let _guard = CONFIG_LOCK.lock().map_err(|e| format!("配置锁获取失败: {e}"))?;
     let dir = dirs::home_dir()
         .ok_or("无法获取 home 目录")?
         .join(".openclaw");
@@ -464,12 +468,14 @@ async fn get_gateway_status() -> serde_json::Value {
 /// 旧格式迁移：将 Gateway 不认识的顶层 key 移到正确位置
 fn migrate_legacy_config(config: &mut serde_json::Value) {
     if let Some(obj) = config.as_object_mut() {
-        // 顶层 ai → gateway.ai
+        // 顶层 ai → gateway.ai（gateway 不存在时先创建）
         if let Some(ai) = obj.remove("ai") {
             if ai.is_object() {
-                if let Some(gw) = obj.get_mut("gateway").and_then(|g| g.as_object_mut()) {
-                    if !gw.contains_key("ai") {
-                        gw.insert("ai".to_string(), ai);
+                let gw = obj.entry("gateway".to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                if let Some(gw_obj) = gw.as_object_mut() {
+                    if !gw_obj.contains_key("ai") {
+                        gw_obj.insert("ai".to_string(), ai);
                     }
                 }
             }
@@ -494,7 +500,9 @@ fn json_deep_merge(target: &mut serde_json::Value, patch: &serde_json::Value) {
             if value.is_null() {
                 target_obj.remove(key);
             } else if value.is_object() && target_obj.get(key).map_or(false, |v| v.is_object()) {
-                json_deep_merge(target_obj.get_mut(key).unwrap(), value);
+                if let Some(existing) = target_obj.get_mut(key) {
+                    json_deep_merge(existing, value);
+                }
             } else {
                 target_obj.insert(key.clone(), value.clone());
             }
