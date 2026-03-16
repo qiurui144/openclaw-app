@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from "vue";
 import { tauri } from "@/composables/useTauri";
 
 interface ChatMessage {
@@ -79,12 +79,16 @@ onMounted(async () => {
   } catch { /* ignore */ }
 });
 
-onUnmounted(() => {
-  if (ws) {
-    ws.close();
-    ws = null;
-  }
+onUnmounted(() => { closeWs(); });
+onDeactivated(() => { closeWs(); });
+onActivated(() => {
+  if (!ws && port) { connect(); }
 });
+
+function closeWs() {
+  if (ws) { ws.close(); ws = null; }
+  connected.value = false;
+}
 
 function connect() {
   if (ws) {
