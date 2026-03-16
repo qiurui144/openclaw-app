@@ -296,13 +296,20 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     install_bundled_skills(config, window);
 
     // Step 4.6: 安装必需的插件（如 qqbot）
+    // Bundled 模式下 qqbot 已预置在 extensions/，仅 Online 模式需在线安装
     if config.qq_config.is_some() {
-        let _ = window.emit("deploy:log", "安装 QQ Bot 插件（@sliverp/qqbot）…");
-        install_plugin(config, "qqbot", "@sliverp/qqbot", window);
+        let qqbot_dir = PathBuf::from(&config.install_path)
+            .join("openclaw_pkg/package/extensions/qqbot");
+        if !qqbot_dir.exists() {
+            let _ = window.emit("deploy:log", "安装 QQ Bot 插件（@sliverp/qqbot）…");
+            install_plugin(config, "qqbot", "@sliverp/qqbot", window);
+        } else {
+            let _ = window.emit("deploy:log", "QQ Bot 插件已预置");
+        }
     }
 
-    // Step 4.7: 安装所有自带插件的依赖（pnpm 优先）
-    let _ = window.emit("deploy:log", "安装插件依赖（pnpm 优先）…");
+    // Step 4.7: 为 extensions 安装缺失的依赖（pnpm 优先）
+    let _ = window.emit("deploy:log", "检查插件依赖…");
     install_plugin_dependencies(config, window);
 
     // Step 5: 写入主配置
@@ -664,10 +671,11 @@ fn install_npm_dependencies(config: &DeployConfig, pkg_dir: &PathBuf, window: &W
     Ok(())
 }
 
-/// 为所有自带插件安装 npm 依赖（pnpm 优先，回落到 npm）
+/// 为所有 extensions 安装 npm 依赖（pnpm 优先，回落到 npm）
 fn install_plugin_dependencies(config: &DeployConfig, window: &Window) {
-    let plugins_dir = PathBuf::from(&config.install_path)
-        .join("openclaw_pkg/package/plugins");
+    let base = PathBuf::from(&config.install_path).join("openclaw_pkg/package");
+    // 扫描 extensions/（内置+第三方插件）
+    let plugins_dir = base.join("extensions");
     if !plugins_dir.exists() { return; }
 
     let node_bin = node_bin_path(&config.install_path);

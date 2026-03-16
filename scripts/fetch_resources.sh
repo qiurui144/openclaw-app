@@ -91,20 +91,42 @@ if [[ "${1:-}" != "--node-only" ]]; then
     echo "  安装生产依赖（npm install --omit=dev --registry=${NPM_REGISTRY}）..."
     (cd "$FAT_TMP/package" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY")
 
-    # 2.5. 为自带插件安装生产依赖
-    if [ -d "$FAT_TMP/package/plugins" ]; then
-      echo "  安装插件依赖..."
-      for plugin_dir in "$FAT_TMP/package/plugins"/*/; do
-        if [ -f "$plugin_dir/package.json" ] && [ ! -d "$plugin_dir/node_modules" ]; then
-          if grep -q '"dependencies"' "$plugin_dir/package.json" 2>/dev/null; then
-            plugin_name=$(basename "$plugin_dir")
-            echo "    $plugin_name..."
-            (cd "$plugin_dir" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY") || \
-              echo "    警告: $plugin_name 依赖安装失败（非致命）"
-          fi
+    # 2.5. 预置第三方插件（qqbot 等）
+    EXTENSIONS_DIR="$FAT_TMP/package/extensions"
+    mkdir -p "$EXTENSIONS_DIR"
+
+    # qqbot (@sliverp/qqbot)
+    QQBOT_PKG="@sliverp/qqbot"
+    QQBOT_VER=$(npm view "$QQBOT_PKG" version --registry "$NPM_REGISTRY" 2>/dev/null) || true
+    if [ -n "$QQBOT_VER" ]; then
+      echo "  预置 qqbot v${QQBOT_VER}..."
+      QQBOT_URL=$(npm view "$QQBOT_PKG@$QQBOT_VER" dist.tarball --registry "$NPM_REGISTRY" 2>/dev/null)
+      if [ -n "$QQBOT_URL" ]; then
+        mkdir -p "$EXTENSIONS_DIR/qqbot"
+        curl -fsSL "$QQBOT_URL" | tar -xz -C "$EXTENSIONS_DIR/qqbot" --strip-components=1
+        # 安装 qqbot 的 npm 依赖
+        if grep -q '"dependencies"' "$EXTENSIONS_DIR/qqbot/package.json" 2>/dev/null; then
+          echo "    安装 qqbot 依赖..."
+          (cd "$EXTENSIONS_DIR/qqbot" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY") || \
+            echo "    警告: qqbot 依赖安装失败（非致命）"
         fi
-      done
+      fi
+    else
+      echo "  警告: 无法获取 qqbot 版本，跳过预置"
     fi
+
+    # 2.6. 为所有 extensions 安装生产依赖（含内置和新增的第三方）
+    echo "  检查 extensions 依赖..."
+    for ext_dir in "$EXTENSIONS_DIR"/*/; do
+      if [ -f "$ext_dir/package.json" ] && [ ! -d "$ext_dir/node_modules" ]; then
+        if grep -q '"dependencies"' "$ext_dir/package.json" 2>/dev/null; then
+          ext_name=$(basename "$ext_dir")
+          echo "    $ext_name..."
+          (cd "$ext_dir" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY") || \
+            echo "    警告: $ext_name 依赖安装失败（非致命）"
+        fi
+      fi
+    done
 
     # 3. 重新打包为 fat tarball（保留 package/ 前缀以兼容 deploy 解压逻辑）
     echo "  打包 fat tarball..."
