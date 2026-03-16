@@ -99,7 +99,8 @@ async function loadSkills() {
 async function loadDisabledList() {
   try {
     const cfg = await tauri.readOpenclawConfig();
-    const disabled = (cfg as Record<string, unknown>).disabledSkills;
+    const wizard = (cfg as Record<string, unknown>)._wizard as Record<string, unknown> | undefined;
+    const disabled = wizard?.disabledSkills;
     if (Array.isArray(disabled)) {
       disabledSkills.value = new Set(disabled as string[]);
     }
@@ -118,7 +119,7 @@ async function toggleSkill(name: string) {
   }
   try {
     await tauri.writeOpenclawConfig({
-      disabledSkills: Array.from(disabledSkills.value),
+      _wizard: { disabledSkills: Array.from(disabledSkills.value) },
     });
     showMsg(true, `${name} 已${isEnabled(name) ? "启用" : "禁用"}`);
   } catch (e) {
