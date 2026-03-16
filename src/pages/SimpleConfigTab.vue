@@ -125,16 +125,16 @@ const platforms: PlatformDef[] = [
       { key: "appId", label: "App ID", placeholder: "cli_开头" },
       { key: "appSecret", label: "App Secret", placeholder: "应用 Secret", secret: true },
     ],
-    toConfig: (d) => ({ appId: d.appId, appSecret: d.appSecret, connectionMode: "websocket" }),
+    toConfig: (d) => ({ enabled: true, accounts: { main: { appId: d.appId, appSecret: d.appSecret } }, connectionMode: "websocket" }),
   },
   {
-    key: "qqbot", label: "QQ", icon: "🐧", tag: "需公网 IP",
-    guide: "QQ 开放平台 → 创建机器人 → 获取 AppID 和 AppSecret，配置回调地址。",
+    key: "qqbot", label: "QQ", icon: "🐧", tag: "插件",
+    guide: "QQ 开放平台 → 创建机器人 → 获取 AppID 和 AppSecret。需先安装 @sliverp/qqbot 插件。",
     fields: [
       { key: "appId", label: "App ID" },
-      { key: "appSecret", label: "App Secret", secret: true },
+      { key: "clientSecret", label: "Client Secret", secret: true },
     ],
-    toConfig: (d) => ({ appId: d.appId, appSecret: d.appSecret, callbackPath: "/webhook/qq" }),
+    toConfig: (d) => ({ enabled: true, appId: d.appId, clientSecret: d.clientSecret }),
   },
   {
     key: "whatsapp", label: "WhatsApp", icon: "📱", tag: "扫码登录",
@@ -240,12 +240,19 @@ onMounted(async () => {
         const ch = channels[plat.key];
         if (ch && typeof ch === "object" && Object.keys(ch).length > 0) {
           configuredPlatforms.value.add(plat.key);
-          // 填充表单（扁平化，处理 wecom 的嵌套 agent 结构）
+          // 填充表单（处理各平台嵌套结构）
           if (plat.key === "wecom" && ch.agent && typeof ch.agent === "object") {
             const agent = ch.agent as Record<string, string>;
             channelData.wecom.corpId = agent.corpId || "";
             channelData.wecom.corpSecret = agent.corpSecret || "";
             channelData.wecom.agentId = agent.agentId || "";
+          } else if (plat.key === "feishu" && ch.accounts && typeof ch.accounts === "object") {
+            const accounts = ch.accounts as Record<string, Record<string, string>>;
+            const main = accounts.main || Object.values(accounts)[0];
+            if (main) {
+              channelData.feishu.appId = main.appId || "";
+              channelData.feishu.appSecret = main.appSecret || "";
+            }
           } else {
             for (const f of plat.fields) {
               channelData[plat.key][f.key] = String(ch[f.key] || "");

@@ -98,20 +98,25 @@ fn write_platform_config_to(
     if let Some(f) = cfg.feishu {
         if !f.app_id.is_empty() && !f.app_secret.is_empty() {
             ch.insert("feishu".to_string(), serde_json::json!({
-                "appId": f.app_id,
-                "appSecret": f.app_secret,
+                "enabled": true,
+                "accounts": {
+                    "main": {
+                        "appId": f.app_id,
+                        "appSecret": f.app_secret,
+                    }
+                },
                 "connectionMode": "websocket",
             }));
         }
     }
 
-    // QQ：回调推送，AppID + AppSecret
+    // QQ：@sliverp/qqbot 插件，appId + clientSecret
     if let Some(q) = cfg.qq {
         if !q.app_id.is_empty() && !q.app_secret.is_empty() {
             ch.insert("qqbot".to_string(), serde_json::json!({
+                "enabled": true,
                 "appId": q.app_id,
-                "appSecret": q.app_secret,
-                "callbackPath": "/webhook/qq",
+                "clientSecret": q.app_secret,
             }));
         }
     }
@@ -196,8 +201,9 @@ mod tests {
 
         let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&data).unwrap();
-        assert_eq!(v["channels"]["feishu"]["appId"], "cli_test");
+        assert_eq!(v["channels"]["feishu"]["accounts"]["main"]["appId"], "cli_test");
         assert_eq!(v["channels"]["feishu"]["connectionMode"], "websocket");
+        assert_eq!(v["channels"]["feishu"]["enabled"], true);
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -215,7 +221,8 @@ mod tests {
         let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&data).unwrap();
         assert_eq!(v["channels"]["qqbot"]["appId"], "12345678");
-        assert_eq!(v["channels"]["qqbot"]["callbackPath"], "/webhook/qq");
+        assert_eq!(v["channels"]["qqbot"]["clientSecret"], "my_secret");
+        assert_eq!(v["channels"]["qqbot"]["enabled"], true);
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -237,7 +244,7 @@ mod tests {
         let data = std::fs::read_to_string(config_dir.join("openclaw.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&data).unwrap();
         assert_eq!(v["gateway"]["port"], 18789);
-        assert_eq!(v["channels"]["feishu"]["appId"], "cli_x");
+        assert_eq!(v["channels"]["feishu"]["accounts"]["main"]["appId"], "cli_x");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
