@@ -37,9 +37,9 @@ RESOURCES_DIR="${RESOURCES_DIR:-resources/binaries}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 
 # Skills 系统工具版本（定期更新）
-JQ_VERSION="${JQ_VERSION:-1.7.1}"
-RG_VERSION="${RG_VERSION:-14.1.1}"
-GH_VERSION="${GH_VERSION:-2.65.0}"
+JQ_VERSION="${JQ_VERSION:-1.8.1}"
+RG_VERSION="${RG_VERSION:-15.1.0}"
+GH_VERSION="${GH_VERSION:-2.88.1}"
 # ffmpeg 使用 johnvansickle 的静态构建（Linux），BtbN（Windows），evermeet（macOS）
 
 mkdir -p "$RESOURCES_DIR/linux" "$RESOURCES_DIR/windows" "$RESOURCES_DIR/macos"
