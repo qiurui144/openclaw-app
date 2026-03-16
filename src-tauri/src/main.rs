@@ -350,7 +350,7 @@ fn get_default_install_path() -> String {
 
 // ── 简化配置页面命令（读写 openclaw.json）──────────────────────────────────
 
-/// 读取 ~/.openclaw/openclaw.json 完整内容
+/// 读取 ~/.openclaw/openclaw.json 完整内容（自动迁移旧格式）
 #[tauri::command]
 fn read_openclaw_config() -> Result<serde_json::Value, String> {
     let path = dirs::home_dir()
@@ -360,7 +360,19 @@ fn read_openclaw_config() -> Result<serde_json::Value, String> {
         return Ok(serde_json::json!({}));
     }
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).map_err(|e| format!("配置文件格式错误: {e}"))
+    let mut config: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|e| format!("配置文件格式错误: {e}"))?;
+
+    // 自动迁移旧格式并回写
+    let had_legacy = config.get("ai").is_some() || config.get("disabledSkills").is_some();
+    if had_legacy {
+        migrate_legacy_config(&mut config);
+        if let Ok(output) = serde_json::to_string_pretty(&config) {
+            let _ = std::fs::write(&path, output);
+        }
+    }
+
+    Ok(config)
 }
 
 /// 写入 ~/.openclaw/openclaw.json（深度合并，不覆盖未传字段）
@@ -391,7 +403,13 @@ fn write_openclaw_config(patch: serde_json::Value) -> Result<(), String> {
         });
     }
 
+    // 旧格式迁移：顶层 ai → gateway.ai（Gateway 严格模式不接受未知顶层 key）
+    migrate_legacy_config(&mut current);
+
     json_deep_merge(&mut current, &patch);
+
+    // 迁移后再次清理（patch 可能又带了旧格式）
+    migrate_legacy_config(&mut current);
 
     // 写入前验证 JSON 完整性
     let output = serde_json::to_string_pretty(&current).map_err(|e| e.to_string())?;
@@ -422,8 +440,10 @@ async fn get_gateway_status() -> serde_json::Value {
         .and_then(|d| serde_json::from_str::<serde_json::Value>(&d).ok())
         .unwrap_or(serde_json::json!({}));
 
-    let ai_provider = config.get("ai").and_then(|a| a.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
-    let ai_model = config.get("ai").and_then(|a| a.get("model")).and_then(|v| v.as_str()).unwrap_or("");
+    // AI 配置嵌套在 gateway.ai 内
+    let gateway_obj = config.get("gateway");
+    let ai_provider = gateway_obj.and_then(|g| g.get("ai")).and_then(|a| a.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
+    let ai_model = gateway_obj.and_then(|g| g.get("ai")).and_then(|a| a.get("model")).and_then(|v| v.as_str()).unwrap_or("");
     let has_ai = !ai_provider.is_empty();
 
     // 检测已配置的聊天平台
@@ -442,6 +462,32 @@ async fn get_gateway_status() -> serde_json::Value {
         },
         "channels": channels,
     })
+}
+
+/// 旧格式迁移：将 Gateway 不认识的顶层 key 移到正确位置
+fn migrate_legacy_config(config: &mut serde_json::Value) {
+    if let Some(obj) = config.as_object_mut() {
+        // 顶层 ai → gateway.ai
+        if let Some(ai) = obj.remove("ai") {
+            if ai.is_object() {
+                if let Some(gw) = obj.get_mut("gateway").and_then(|g| g.as_object_mut()) {
+                    if !gw.contains_key("ai") {
+                        gw.insert("ai".to_string(), ai);
+                    }
+                }
+            }
+        }
+        // 顶层 disabledSkills → _wizard.disabledSkills
+        if let Some(ds) = obj.remove("disabledSkills") {
+            let wizard = obj.entry("_wizard".to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(w) = wizard.as_object_mut() {
+                if !w.contains_key("disabledSkills") {
+                    w.insert("disabledSkills".to_string(), ds);
+                }
+            }
+        }
+    }
 }
 
 /// JSON 深度合并（patch 中的值覆盖 target 对应 key，递归合并对象）

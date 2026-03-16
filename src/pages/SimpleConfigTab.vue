@@ -203,8 +203,9 @@ const configuredPlatforms = ref<Set<string>>(new Set());
 onMounted(async () => {
   try {
     const cfg = await tauri.readOpenclawConfig();
-    // 加载 AI 配置
-    const aiCfg = cfg.ai as Record<string, string> | undefined;
+    // 加载 AI 配置（嵌套在 gateway.ai 内）
+    const gw = cfg.gateway as Record<string, unknown> | undefined;
+    const aiCfg = gw?.ai as Record<string, string> | undefined;
     if (aiCfg) {
       ai.provider = aiCfg.provider || "";
       ai.baseUrl = aiCfg.baseUrl || "";
@@ -278,11 +279,13 @@ async function saveAiConfig() {
   saving.value = true;
   try {
     await tauri.writeOpenclawConfig({
-      ai: {
-        provider: ai.provider,
-        baseUrl: ai.baseUrl,
-        apiKey: ai.apiKey,
-        model: ai.model,
+      gateway: {
+        ai: {
+          provider: ai.provider,
+          baseUrl: ai.baseUrl,
+          apiKey: ai.apiKey,
+          model: ai.model,
+        },
       },
     });
     showSaveMsg(true, "AI 配置已保存");
