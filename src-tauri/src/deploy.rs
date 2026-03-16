@@ -1,7 +1,7 @@
 use anyhow::Result;
 use secrecy::Secret;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{Emitter, Window};
 
 use crate::platform_config::{DingtalkConfig, FeishuConfig, PlatformConfigs, QqConfig, WecomConfig};
@@ -120,6 +120,130 @@ fn emit_progress(window: &Window, step: u32, total: u32, msg: &str) {
     });
 }
 
+// ── 安装路径校验 ─────────────────────────────────────────────────
+
+/// 系统关键目录黑名单（路径规范化后比较）
+const PATH_BLACKLIST: &[&str] = &[
+    "/", "/bin", "/sbin", "/usr", "/usr/bin", "/usr/sbin", "/usr/lib",
+    "/etc", "/var", "/tmp", "/dev", "/proc", "/sys", "/boot", "/root",
+    "/lib", "/lib64",
+];
+
+#[cfg(windows)]
+const PATH_BLACKLIST_WIN: &[&str] = &[
+    "C:\\", "C:\\Windows", "C:\\Windows\\System32",
+    "C:\\Program Files", "C:\\Program Files (x86)",
+];
+
+/// 规范化路径：解析 . 和 .. 组件（纯逻辑处理，不依赖文件系统存在性）
+fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => { result.pop(); }
+            Component::CurDir => {}
+            _ => result.push(component),
+        }
+    }
+    result
+}
+
+/// 校验安装路径：非空、合法字符、不在黑名单、可写、磁盘空间充足（≥500MB）
+pub fn validate_install_path(path: &str) -> Result<()> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("安装路径不能为空");
+    }
+
+    // 非法字符检测（允许中文路径，但禁止控制字符和部分 shell 特殊字符）
+    let invalid_chars = ['<', '>', '|', '"', '\0', '*', '?'];
+    if trimmed.chars().any(|c| invalid_chars.contains(&c) || c.is_control()) {
+        anyhow::bail!("安装路径包含非法字符（<>|\"*? 或控制字符）");
+    }
+
+    // 规范化路径：清理 .. 和 . 组件，防止 /usr/lib/../../etc 绕过黑名单
+    let normalized = normalize_path(Path::new(trimmed));
+
+    // 黑名单检测（Unix）
+    #[cfg(unix)]
+    {
+        let path_str = normalized.to_string_lossy();
+        for &bl in PATH_BLACKLIST {
+            if path_str == bl || path_str == format!("{}/", bl) {
+                anyhow::bail!("安装路径不能是系统关键目录：{}", bl);
+            }
+        }
+    }
+
+    // 黑名单检测（Windows）
+    #[cfg(windows)]
+    {
+        let path_upper = normalized.to_string_lossy().to_uppercase();
+        for &bl in PATH_BLACKLIST_WIN {
+            if path_upper == bl.to_uppercase()
+                || path_upper == format!("{}\\", bl).to_uppercase()
+            {
+                anyhow::bail!("安装路径不能是系统关键目录：{}", bl);
+            }
+        }
+    }
+
+    // 可写检测：尝试在目标（或其最近的已存在祖先）创建临时文件
+    let test_dir = if normalized.exists() {
+        normalized.clone()
+    } else {
+        // 找到最近存在的父目录
+        let mut parent = normalized.clone();
+        loop {
+            if parent.exists() { break; }
+            if !parent.pop() {
+                anyhow::bail!("安装路径无效：无法定位可写的父目录");
+            }
+        }
+        parent
+    };
+    let probe = test_dir.join(".openclaw_write_probe");
+    match std::fs::write(&probe, b"probe") {
+        Ok(()) => { let _ = std::fs::remove_file(&probe); }
+        Err(e) => anyhow::bail!("安装路径不可写（{}）：{}", test_dir.display(), e),
+    }
+
+    // 磁盘空间检测（≥500MB）
+    check_disk_space(&test_dir, 500)?;
+
+    Ok(())
+}
+
+/// 检查指定路径所在磁盘的可用空间（单位 MB）
+fn check_disk_space(path: &Path, required_mb: u64) -> Result<()> {
+    use sysinfo::Disks;
+    let disks = Disks::new_with_refreshed_list();
+    let mut best_match: Option<(usize, u64)> = None; // (mount_point_len, available_bytes)
+
+    for disk in disks.list() {
+        let mount = disk.mount_point();
+        if path.starts_with(mount) {
+            let mount_len = mount.to_string_lossy().len();
+            if best_match.map_or(true, |(len, _)| mount_len > len) {
+                best_match = Some((mount_len, disk.available_space()));
+            }
+        }
+    }
+
+    if let Some((_, available)) = best_match {
+        let available_mb = available / (1024 * 1024);
+        if available_mb < required_mb {
+            anyhow::bail!(
+                "磁盘空间不足：可用 {} MB，至少需要 {} MB",
+                available_mb, required_mb
+            );
+        }
+    }
+    // 如果没匹配到磁盘（例如网络路径），跳过空间检查
+    Ok(())
+}
+
 /// 异步命令直接调用，不 spawn 独立任务（确保事件在同一 async 上下文发出）
 pub async fn do_deploy_direct(config: DeployConfig, window: &Window) -> Result<()> {
     do_deploy(&config, window).await
@@ -127,6 +251,11 @@ pub async fn do_deploy_direct(config: DeployConfig, window: &Window) -> Result<(
 
 async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     const TOTAL: u32 = 11;
+
+    // Step 0: 安装路径预检
+    let _ = window.emit("deploy:log", "校验安装路径…");
+    validate_install_path(&config.install_path)?;
+
     // Step 1: 创建安装目录
     emit_progress(window, 1, TOTAL, "创建安装目录…");
     let _ = window.emit("deploy:log", format!("安装路径: {}", config.install_path));
@@ -155,6 +284,10 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
 
     emit_progress(window, 4, TOTAL, "解包 OpenClaw（含所有依赖，请稍候）…");
     extract_openclaw(config, window)?;
+
+    // Step 4.5: 释放预缓存的 Skills
+    let _ = window.emit("deploy:log", "安装预缓存的 Skills…");
+    install_bundled_skills(config, window);
 
     // Step 5: 写入主配置
     emit_progress(window, 5, TOTAL, "写入配置文件…");
@@ -327,6 +460,70 @@ fn extract_openclaw(config: &DeployConfig, window: &Window) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// 释放预缓存的官方 Skills 到安装目录（Bundled 模式从内嵌资源，Online 时可选跳过）
+fn install_bundled_skills(config: &DeployConfig, window: &Window) {
+    use tauri::Manager;
+
+    let skills_dest = PathBuf::from(&config.install_path)
+        .join("openclaw_pkg").join("package").join("skills");
+
+    // 如果 skills 目录已存在且非空，跳过（保留用户自定义）
+    if skills_dest.exists() && std::fs::read_dir(&skills_dest).map(|mut d| d.next().is_some()).unwrap_or(false) {
+        let _ = window.emit("deploy:log", "Skills 目录已存在，跳过预装");
+        return;
+    }
+
+    // 通过 Tauri resource_dir 查找打包的 Skills 资源
+    // CI 构建时 fetch_resources.sh 将 Skills 下载到 resources/skills/，
+    // tauri.conf.json 的 bundle.resources 将其打包到应用资源目录
+    let app = window.app_handle();
+    let candidates: Vec<PathBuf> = vec![
+        // 发布构建：Tauri 资源目录下的 skills/
+        app.path().resource_dir().ok().map(|p| p.join("skills")),
+        // 开发模式回退：项目 resources 目录
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources/skills")),
+    ].into_iter().flatten().collect();
+
+    for src_dir in &candidates {
+        if src_dir.exists() && src_dir.is_dir() {
+            let _ = std::fs::create_dir_all(&skills_dest);
+            match copy_dir_contents(src_dir, &skills_dest) {
+                Ok(count) if count > 0 => {
+                    let _ = window.emit("deploy:log", format!("预装 {} 个 Skills（来源: {}）", count, src_dir.display()));
+                    return;
+                }
+                Ok(_) => continue,
+                Err(e) => {
+                    let _ = window.emit("deploy:log", format!("Skills 预装失败（非致命）: {}", e));
+                }
+            }
+        }
+    }
+    let _ = window.emit("deploy:log", "无预缓存 Skills，跳过预装（可在配置页面手动安装）");
+}
+
+/// 递归复制目录内容，返回复制的文件数（跳过符号链接，避免循环）
+fn copy_dir_contents(src: &Path, dest: &Path) -> Result<usize> {
+    let mut count = 0;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            continue; // 跳过符号链接，避免循环引用
+        }
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if ft.is_dir() {
+            std::fs::create_dir_all(&dest_path)?;
+            count += copy_dir_contents(&src_path, &dest_path)?;
+        } else {
+            std::fs::copy(&src_path, &dest_path)?;
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 /// 使用部署的 node 执行 npm install 安装 openclaw 的生产依赖
@@ -1035,6 +1232,49 @@ mod tests {
         };
         let config = DeployConfig::from(dto);
         assert!(matches!(config.source_mode, SourceMode::LocalZip(_)));
+    }
+
+    #[test]
+    fn test_validate_install_path_rejects_root() {
+        let err = validate_install_path("/").unwrap_err();
+        assert!(err.to_string().contains("系统关键目录"));
+    }
+
+    #[test]
+    fn test_validate_install_path_rejects_empty() {
+        let err = validate_install_path("").unwrap_err();
+        assert!(err.to_string().contains("不能为空"));
+    }
+
+    #[test]
+    fn test_validate_install_path_rejects_invalid_chars() {
+        let err = validate_install_path("/tmp/test<dir>").unwrap_err();
+        assert!(err.to_string().contains("非法字符"));
+    }
+
+    #[test]
+    fn test_validate_install_path_accepts_valid() {
+        // /tmp 存在且可写，空间充足
+        assert!(validate_install_path("/tmp/openclaw_test_install").is_ok());
+    }
+
+    #[test]
+    fn test_validate_install_path_rejects_dotdot_bypass() {
+        // /usr/lib/../../etc 规范化后等于 /etc，应被黑名单拦截
+        let err = validate_install_path("/usr/lib/../../etc").unwrap_err();
+        assert!(err.to_string().contains("系统关键目录"));
+    }
+
+    #[test]
+    fn test_normalize_path() {
+        assert_eq!(normalize_path(std::path::Path::new("/usr/lib/../../etc")), std::path::PathBuf::from("/etc"));
+        assert_eq!(normalize_path(std::path::Path::new("/opt/./openclaw")), std::path::PathBuf::from("/opt/openclaw"));
+    }
+
+    #[test]
+    fn test_validate_install_path_rejects_usr() {
+        let err = validate_install_path("/usr").unwrap_err();
+        assert!(err.to_string().contains("系统关键目录"));
     }
 
     /// 验证前端真实发出的 JSON 格式能被正确反序列化。

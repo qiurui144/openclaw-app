@@ -14,6 +14,8 @@ const routes = [
   { path: "/finish",            name: "finish",            component: () => import("@/pages/FinishPage.vue") },
   { path: "/update",            name: "update",            component: () => import("@/pages/UpdatePage.vue") },
   { path: "/uninstall",         name: "uninstall",         component: () => import("@/pages/UninstallPage.vue") },
+  // 简化配置页面（第二窗口）
+  { path: "/simple",            name: "simple",            component: () => import("@/pages/SimpleDashboard.vue") },
 ];
 
 export const router = createRouter({

@@ -47,9 +47,23 @@ export const tauri = {
     invoke<void>("apply_openclaw_update", { installPath, downloadUrl, sha256: sha256 ?? null, proxyUrl: proxyUrl ?? null }),
   readDeployMeta: () => invoke<DeployMeta | null>("read_deploy_meta"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
+  validateInstallPath: (path: string) => invoke<void>("validate_install_path", { path }),
   getDefaultInstallPath: () => invoke<string>("get_default_install_path"),
   healthCheck: (port: number) => invoke<void>("health_check", { port }),
-  runUninstall: (installPath: string) => invoke<void>("run_uninstall", { installPath }),
+  runUninstall: (installPath: string, servicePort?: number) =>
+    invoke<{ step: string; success: boolean; detail: string }[]>("run_uninstall", { installPath, servicePort: servicePort ?? null }),
+  // 简化配置页面
+  readOpenclawConfig: () => invoke<Record<string, unknown>>("read_openclaw_config"),
+  writeOpenclawConfig: (patch: Record<string, unknown>) => invoke<void>("write_openclaw_config", { patch }),
+  getGatewayStatus: () => invoke<{
+    running: boolean;
+    port: number;
+    has_meta: boolean;
+    version: string;
+    install_path: string;
+    ai: { configured: boolean; provider: string; model: string };
+    channels: Record<string, unknown>;
+  }>("get_gateway_status"),
   // 服务控制（托盘 + FinishPage 共用）
   serviceStatus: () => invoke<"running" | "stopped" | "unknown">("service_status"),
   serviceStart: () => invoke<void>("service_start"),

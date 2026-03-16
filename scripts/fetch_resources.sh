@@ -147,6 +147,27 @@ else
   echo "macOS Mihomo 已存在，跳过"
 fi
 
+# ── 官方 Skills 预缓存（全量预装）────────────────────────────
+SKILLS_DIR="${RESOURCES_DIR}/skills"
+if [[ "${1:-}" != "--node-only" ]]; then
+  if [[ ! -d "$SKILLS_DIR" ]] || [[ $(ls -1 "$SKILLS_DIR" 2>/dev/null | wc -l) -eq 0 ]]; then
+    echo "下载官方 Skills 到 ${SKILLS_DIR}..."
+    mkdir -p "$SKILLS_DIR"
+    # 通过 openclaw 自带的 skills 导出功能获取，或使用 npm 方式下载
+    # 方案：从 npm registry 查询 openclaw 包自带的 skills 列表，逐个下载
+    # 如果 clawhub CLI 可用则用 clawhub install --all-official
+    if command -v npx &>/dev/null; then
+      echo "  尝试通过 npx 下载 Skills..."
+      (cd "$SKILLS_DIR" && npx --yes @anthropic-ai/clawhub install --all-official --dir . 2>/dev/null) || \
+        echo "  clawhub 不可用，跳过 Skills 预缓存（将在部署时在线安装）"
+    else
+      echo "  npx 不可用，跳过 Skills 预缓存"
+    fi
+  else
+    echo "Skills 已存在（$(ls -1 "$SKILLS_DIR" | wc -l) 个），跳过"
+  fi
+fi
+
 echo ""
 echo "=== 资源清单 ==="
 ls -lh "$RESOURCES_DIR/linux/node" "$RESOURCES_DIR/linux/openclaw.tgz" "$RESOURCES_DIR/linux/mihomo" \

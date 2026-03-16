@@ -1,0 +1,12 @@
+{
+  "identifier": "simple-dashboard",
+  "description": "Capabilities for the simple dashboard window (config/status/chat)",
+  "windows": ["simple"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-show"
+  ]
+}
