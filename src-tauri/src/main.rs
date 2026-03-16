@@ -361,6 +361,7 @@ fn read_openclaw_config() -> Result<serde_json::Value, String> {
 }
 
 /// 写入 ~/.openclaw/openclaw.json（深度合并，不覆盖未传字段）
+/// 如果文件不存在，自动从 deploy_meta 恢复基础 gateway 配置
 #[tauri::command]
 fn write_openclaw_config(patch: serde_json::Value) -> Result<(), String> {
     let dir = dirs::home_dir()
@@ -376,10 +377,26 @@ fn write_openclaw_config(patch: serde_json::Value) -> Result<(), String> {
         serde_json::json!({})
     };
 
+    // 确保 gateway 基础配置存在（无 gateway 时 Gateway 服务无法启动）
+    if current.get("gateway").is_none() {
+        let meta = service_ctrl::read_meta();
+        let port = meta.as_ref().map(|m| m.service_port).unwrap_or(18789);
+        current["gateway"] = serde_json::json!({
+            "port": port,
+            "mode": "local",
+            "auth": { "password": "" }
+        });
+    }
+
     json_deep_merge(&mut current, &patch);
 
-    std::fs::write(&path, serde_json::to_string_pretty(&current).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    // 写入前验证 JSON 完整性
+    let output = serde_json::to_string_pretty(&current).map_err(|e| e.to_string())?;
+    // 确保能被重新解析（防止损坏）
+    serde_json::from_str::<serde_json::Value>(&output)
+        .map_err(|e| format!("配置序列化后校验失败: {e}"))?;
+
+    std::fs::write(&path, output).map_err(|e| e.to_string())
 }
 
 /// 获取 Gateway 综合状态（健康、已配置的平台/AI 信息）
