@@ -578,97 +578,42 @@ fn copy_dir_contents(src: &Path, dest: &Path) -> Result<usize> {
 
 const CHINA_REGISTRY: &str = "https://registry.npmmirror.com";
 
-/// 确保 pnpm 可用：先检测系统 pnpm，否则通过 corepack 或 npm 全局安装
-fn ensure_pnpm(node_bin: &Path, window: &Window) -> Option<PathBuf> {
-    // 1. 系统已有 pnpm
-    if let Ok(out) = std::process::Command::new("pnpm").arg("--version").output() {
-        if out.status.success() {
-            let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let _ = window.emit("deploy:log", format!("检测到系统 pnpm {}", ver));
-            return Some(PathBuf::from("pnpm"));
-        }
-    }
+/// 使用部署的 node + npm 安装依赖
+fn run_npm_install(node_bin: &Path, pkg_dir: &Path, install_path: &str, proxy_env: &[(&str, &str)], window: &Window) -> Result<()> {
+    let npm_cli = find_npm_cli(&node_bin.to_path_buf())?;
+    let _ = window.emit("deploy:log", format!("npm cli: {}", npm_cli.display()));
+    let mut cmd = std::process::Command::new(node_bin);
+    cmd.arg(&npm_cli)
+        .args(["install", "--omit=dev", "--no-audit", "--no-fund",
+               "--no-package-lock",
+               &format!("--registry={}", CHINA_REGISTRY)])
+        .current_dir(pkg_dir)
+        .env("NODE_ENV", "production")
+        .env("npm_config_userconfig", pkg_dir.join(".npmrc_empty").to_str().unwrap_or(""))
+        .env("npm_config_cache", PathBuf::from(install_path).join(".npm_cache").to_str().unwrap_or(""));
+    for (k, v) in proxy_env { cmd.env(k, v); }
 
-    // 2. 通过 corepack 启用 pnpm（Node.js 16.9+ 自带 corepack）
-    if let Some(parent) = node_bin.parent() {
-        let corepack = parent.join("corepack");
-        if corepack.exists() {
-            let _ = window.emit("deploy:log", "通过 corepack 启用 pnpm…");
-            if let Ok(out) = std::process::Command::new(&corepack).args(["enable", "pnpm"]).output() {
-                if out.status.success() {
-                    let _ = window.emit("deploy:log", "corepack enable pnpm 成功");
-                    return Some(PathBuf::from("pnpm"));
-                }
-            }
-        }
+    let output = cmd.output()
+        .map_err(|e| anyhow::anyhow!("执行 npm install 失败: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = window.emit("deploy:log", format!("npm install 错误: {}", stderr));
+        anyhow::bail!("npm install 失败（退出码 {}）:\n{}",
+            output.status.code().unwrap_or(-1), stderr);
     }
-
-    // 3. 通过 npm 全局安装 pnpm
-    if let Ok(npm_cli) = find_npm_cli(&node_bin.to_path_buf()) {
-        let _ = window.emit("deploy:log", "通过 npm 安装 pnpm…");
-        let result = std::process::Command::new(node_bin)
-            .args([npm_cli.to_str().unwrap_or_default(),
-                   "install", "-g", "pnpm",
-                   &format!("--registry={}", CHINA_REGISTRY)])
-            .output();
-        if let Ok(out) = result {
-            if out.status.success() {
-                let _ = window.emit("deploy:log", "pnpm 安装成功");
-                return Some(PathBuf::from("pnpm"));
-            }
-        }
-    }
-
-    let _ = window.emit("deploy:log", "pnpm 不可用，将使用 npm 回落");
-    None
+    let _ = window.emit("deploy:log", "npm 依赖安装完成");
+    Ok(())
 }
 
-/// 使用 pnpm（优先）或 npm 安装 openclaw 的生产依赖
+/// 使用部署的 node + npm 安装 openclaw 的生产依赖
 fn install_npm_dependencies(config: &DeployConfig, pkg_dir: &PathBuf, window: &Window) -> Result<()> {
     let node_bin = node_bin_path(&config.install_path);
-    let pnpm = ensure_pnpm(&node_bin, window);
-
     let proxy_env: Vec<(&str, &str)> = match &config.source_mode {
         SourceMode::Online { proxy_url: Some(url) } =>
             vec![("HTTP_PROXY", url.as_str()), ("HTTPS_PROXY", url.as_str())],
         _ => vec![],
     };
-
-    let (output, pkg_mgr_name) = if let Some(pnpm_path) = &pnpm {
-        let mut cmd = std::process::Command::new(pnpm_path);
-        cmd.args(["install", "--prod", &format!("--registry={}", CHINA_REGISTRY)])
-            .current_dir(pkg_dir)
-            .env("NODE_ENV", "production");
-        for (k, v) in &proxy_env { cmd.env(k, v); }
-        (cmd.output(), "pnpm")
-    } else {
-        let npm_cli = find_npm_cli(&node_bin)?;
-        let _ = window.emit("deploy:log", format!("npm cli: {}", npm_cli.display()));
-        let mut cmd = std::process::Command::new(&node_bin);
-        cmd.arg(&npm_cli)
-            .args(["install", "--omit=dev", "--no-audit", "--no-fund",
-                   "--no-package-lock",
-                   &format!("--registry={}", CHINA_REGISTRY)])
-            .current_dir(pkg_dir)
-            .env("NODE_ENV", "production")
-            .env("npm_config_userconfig", pkg_dir.join(".npmrc_empty").to_str().unwrap_or(""))
-            .env("npm_config_cache", PathBuf::from(&config.install_path).join(".npm_cache").to_str().unwrap_or(""));
-        for (k, v) in &proxy_env { cmd.env(k, v); }
-        (cmd.output(), "npm")
-    };
-
-    let output = output
-        .map_err(|e| anyhow::anyhow!("执行 {} install 失败: {}", pkg_mgr_name, e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let _ = window.emit("deploy:log", format!("{} install 错误: {}", pkg_mgr_name, stderr));
-        anyhow::bail!("{} install 失败（退出码 {}）:\n{}",
-            pkg_mgr_name, output.status.code().unwrap_or(-1), stderr);
-    }
-
-    let _ = window.emit("deploy:log", format!("{} 依赖安装完成", pkg_mgr_name));
-    Ok(())
+    run_npm_install(&node_bin, pkg_dir, &config.install_path, &proxy_env, window)
 }
 
 /// 为所有 extensions 安装 npm 依赖（pnpm 优先，回落到 npm）
@@ -681,8 +626,13 @@ fn install_plugin_dependencies(config: &DeployConfig, window: &Window) {
     let node_bin = node_bin_path(&config.install_path);
     if !node_bin.exists() { return; }
 
-    // 确定包管理器（复用 ensure_pnpm 的结果）
-    let pnpm = ensure_pnpm(&node_bin, window);
+    let npm_cli = match find_npm_cli(&node_bin) {
+        Ok(cli) => cli,
+        Err(_) => {
+            let _ = window.emit("deploy:log", "npm 不可用，跳过插件依赖安装");
+            return;
+        }
+    };
 
     let entries: Vec<_> = std::fs::read_dir(&plugins_dir)
         .into_iter().flatten().flatten()
@@ -699,7 +649,6 @@ fn install_plugin_dependencies(config: &DeployConfig, window: &Window) {
             skipped += 1;
             continue;
         }
-        // 检查是否有 dependencies
         let has_deps = std::fs::read_to_string(dir.join("package.json")).ok()
             .and_then(|d| serde_json::from_str::<serde_json::Value>(&d).ok())
             .map(|v| v.get("dependencies").and_then(|d| d.as_object()).map(|o| !o.is_empty()).unwrap_or(false))
@@ -709,31 +658,17 @@ fn install_plugin_dependencies(config: &DeployConfig, window: &Window) {
         let name = entry.file_name().to_string_lossy().to_string();
         let _ = window.emit("deploy:log", format!("安装插件依赖: {}…", name));
 
-        let output = if let Some(pnpm_path) = &pnpm {
-            let mut cmd = std::process::Command::new(pnpm_path);
-            cmd.args(["install", "--prod", &format!("--registry={}", CHINA_REGISTRY)])
-                .current_dir(&dir)
-                .env("NODE_ENV", "production");
-            if let SourceMode::Online { proxy_url: Some(url) } = &config.source_mode {
-                cmd.env("HTTP_PROXY", url).env("HTTPS_PROXY", url);
-            }
-            cmd.output()
-        } else if let Ok(npm_cli) = find_npm_cli(&node_bin) {
-            let mut cmd = std::process::Command::new(&node_bin);
-            cmd.arg(&npm_cli)
-                .args(["install", "--omit=dev", "--no-audit", "--no-fund",
-                       "--no-package-lock", &format!("--registry={}", CHINA_REGISTRY)])
-                .current_dir(&dir)
-                .env("NODE_ENV", "production");
-            if let SourceMode::Online { proxy_url: Some(url) } = &config.source_mode {
-                cmd.env("HTTP_PROXY", url).env("HTTPS_PROXY", url);
-            }
-            cmd.output()
-        } else {
-            continue;
-        };
+        let mut cmd = std::process::Command::new(&node_bin);
+        cmd.arg(&npm_cli)
+            .args(["install", "--omit=dev", "--no-audit", "--no-fund",
+                   "--no-package-lock", &format!("--registry={}", CHINA_REGISTRY)])
+            .current_dir(&dir)
+            .env("NODE_ENV", "production");
+        if let SourceMode::Online { proxy_url: Some(url) } = &config.source_mode {
+            cmd.env("HTTP_PROXY", url).env("HTTPS_PROXY", url);
+        }
 
-        match output {
+        match cmd.output() {
             Ok(out) if out.status.success() => { installed += 1; }
             Ok(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
