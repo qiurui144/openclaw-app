@@ -616,32 +616,51 @@ fn write_main_config(config: &DeployConfig) -> Result<()> {
         .join(".openclaw");
     std::fs::create_dir_all(&config_dir)?;
 
-    // openclaw 2026.x 配置格式：gateway.mode + gateway.auth.password（明文）
+    // Gateway 配置（参考 https://docs.openclaw.ai/gateway/configuration-reference）
     let mut gateway = serde_json::json!({
         "port": config.service_port,
         "mode": "local",
         "auth": {
+            "mode": "password",
             "password": config.admin_password.expose_secret()
         }
     });
     if let Some(domain) = &config.domain_name {
-        gateway["mode"] = serde_json::json!("public");
-        gateway["publicUrl"] = serde_json::json!(format!("https://{}", domain));
+        gateway["mode"] = serde_json::json!("remote");
     }
 
-    // AI 配置嵌入 gateway 内部（Gateway 严格模式不接受未知的顶层 key）
+    let mut cfg = serde_json::json!({ "gateway": gateway });
+
+    // AI 模型配置：agents.defaults.model + env 段放 API Key
     if let Some(ai) = &config.ai_config {
         if !ai.api_key.is_empty() {
-            gateway["ai"] = serde_json::json!({
-                "provider": ai.provider,
-                "baseUrl": ai.base_url,
-                "apiKey": ai.api_key,
-                "model": ai.model,
+            // 模型格式: "provider/model-id"
+            let model_id = if ai.model.contains('/') {
+                ai.model.clone()
+            } else {
+                format!("{}/{}", ai.provider, ai.model)
+            };
+            cfg["agents"] = serde_json::json!({
+                "defaults": {
+                    "model": model_id,
+                }
             });
+            // 自定义 provider 需要 baseUrl 时，通过 models.providers 配置
+            if !ai.base_url.is_empty() {
+                cfg["models"] = serde_json::json!({
+                    "providers": {
+                        ai.provider.clone(): {
+                            "baseUrl": ai.base_url,
+                            "apiKey": format!("${{{}_API_KEY}}", ai.provider.to_uppercase()),
+                        }
+                    }
+                });
+                // API Key 放入 env 段
+                let env_key = format!("{}_API_KEY", ai.provider.to_uppercase());
+                cfg["env"] = serde_json::json!({ env_key: ai.api_key });
+            }
         }
     }
-
-    let cfg = serde_json::json!({ "gateway": gateway });
 
     std::fs::write(
         config_dir.join("openclaw.json"),

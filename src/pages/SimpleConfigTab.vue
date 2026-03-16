@@ -203,14 +203,35 @@ const configuredPlatforms = ref<Set<string>>(new Set());
 onMounted(async () => {
   try {
     const cfg = await tauri.readOpenclawConfig();
-    // 加载 AI 配置（嵌套在 gateway.ai 内）
-    const gw = cfg.gateway as Record<string, unknown> | undefined;
-    const aiCfg = gw?.ai as Record<string, string> | undefined;
-    if (aiCfg) {
-      ai.provider = aiCfg.provider || "";
-      ai.baseUrl = aiCfg.baseUrl || "";
-      ai.apiKey = aiCfg.apiKey || "";
-      ai.model = aiCfg.model || "";
+    // 加载 AI 配置（agents.defaults.model + models.providers + env）
+    const agents = cfg.agents as Record<string, unknown> | undefined;
+    const defaults = agents?.defaults as Record<string, unknown> | undefined;
+    const modelFull = (defaults?.model as string) || "";
+    if (modelFull) {
+      const slashIdx = modelFull.indexOf("/");
+      if (slashIdx > 0) {
+        ai.provider = modelFull.slice(0, slashIdx);
+        ai.model = modelFull.slice(slashIdx + 1);
+      } else {
+        ai.model = modelFull;
+      }
+      // 读取 baseUrl 和 apiKey
+      const models = cfg.models as Record<string, unknown> | undefined;
+      const providers = models?.providers as Record<string, Record<string, string>> | undefined;
+      if (providers?.[ai.provider]) {
+        ai.baseUrl = providers[ai.provider].baseUrl || "";
+      }
+      // API Key 从 env 段读取
+      const envCfg = cfg.env as Record<string, string> | undefined;
+      const envKey = `${ai.provider.toUpperCase()}_API_KEY`;
+      if (envCfg?.[envKey]) {
+        ai.apiKey = envCfg[envKey];
+      }
+      // 也尝试从预设 provider 匹配 baseUrl
+      if (!ai.baseUrl) {
+        const preset = AI_PROVIDERS.find((p) => p.value === ai.provider);
+        if (preset) ai.baseUrl = preset.baseUrl;
+      }
     }
     // 加载 channel 配置
     const channels = cfg.channels as Record<string, Record<string, unknown>> | undefined;
@@ -271,16 +292,24 @@ async function testAiConnection() {
 async function saveAiConfig() {
   saving.value = true;
   try {
-    await tauri.writeOpenclawConfig({
-      gateway: {
-        ai: {
-          provider: ai.provider,
-          baseUrl: ai.baseUrl,
-          apiKey: ai.apiKey,
-          model: ai.model,
+    // Gateway 格式：agents.defaults.model + models.providers + env
+    const modelId = ai.model.includes("/") ? ai.model : `${ai.provider}/${ai.model}`;
+    const envKey = `${ai.provider.toUpperCase()}_API_KEY`;
+    const patch: Record<string, unknown> = {
+      agents: { defaults: { model: modelId } },
+    };
+    if (ai.baseUrl) {
+      patch.models = {
+        providers: {
+          [ai.provider]: {
+            baseUrl: ai.baseUrl,
+            apiKey: `\${${envKey}}`,
+          },
         },
-      },
-    });
+      };
+      patch.env = { [envKey]: ai.apiKey };
+    }
+    await tauri.writeOpenclawConfig(patch);
     showSaveMsg(true, "AI 配置已保存");
   } catch (e) {
     showSaveMsg(false, `保存失败: ${e}`);

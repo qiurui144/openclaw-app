@@ -361,80 +361,109 @@ fn get_default_install_path() -> String {
     return "/opt/openclaw".to_string();
 }
 
-// ── 简化配置页面命令（读写 openclaw.json）──────────────────────────────────
+// ── 简化配置页面命令（读写配置）─────────────────────────────────────────────
+// openclaw.json: 只写 Gateway 认识的 key（gateway/agents/models/channels/env/session 等）
+// wizard.json:   向导专属数据（disabledSkills 等），Gateway 不读此文件
 
 /// 配置文件读写锁（防止并发 read-modify-write 竞态）
 static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// 读取 ~/.openclaw/openclaw.json 完整内容（自动迁移旧格式）
-#[tauri::command]
-fn read_openclaw_config() -> Result<serde_json::Value, String> {
-    let path = dirs::home_dir()
-        .ok_or("无法获取 home 目录")?
-        .join(".openclaw/openclaw.json");
-    if !path.exists() {
-        return Ok(serde_json::json!({}));
-    }
-    let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut config: serde_json::Value = serde_json::from_str(&data)
-        .map_err(|e| format!("配置文件格式错误: {e}"))?;
+/// Gateway 接受的顶层 key 白名单（参考 docs.openclaw.ai/gateway/configuration-reference）
+const GATEWAY_ALLOWED_KEYS: &[&str] = &[
+    "$schema", "gateway", "agents", "models", "channels", "session",
+    "messages", "tools", "skills", "plugins", "browser", "ui",
+    "commands", "talk", "env", "cron", "hooks", "bindings",
+    "logging", "audio",
+];
 
-    // 自动迁移旧格式并回写
-    let had_legacy = config.get("ai").is_some() || config.get("disabledSkills").is_some();
-    if had_legacy {
-        migrate_legacy_config(&mut config);
-        if let Ok(output) = serde_json::to_string_pretty(&config) {
-            let _ = std::fs::write(&path, output);
-        }
-    }
-
-    Ok(config)
-}
-
-/// 写入 ~/.openclaw/openclaw.json（深度合并，不覆盖未传字段）
-/// 如果文件不存在，自动从 deploy_meta 恢复基础 gateway 配置
-#[tauri::command]
-fn write_openclaw_config(patch: serde_json::Value) -> Result<(), String> {
-    let _guard = CONFIG_LOCK.lock().map_err(|e| format!("配置锁获取失败: {e}"))?;
+fn openclaw_dir() -> Result<std::path::PathBuf, String> {
     let dir = dirs::home_dir()
         .ok_or("无法获取 home 目录")?
         .join(".openclaw");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join("openclaw.json");
+    Ok(dir)
+}
 
-    let mut current: serde_json::Value = if path.exists() {
-        let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&data).unwrap_or(serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
+fn read_json_file(path: &std::path::Path) -> serde_json::Value {
+    if !path.exists() { return serde_json::json!({}); }
+    std::fs::read_to_string(path).ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+        .unwrap_or(serde_json::json!({}))
+}
 
-    // 确保 gateway 基础配置存在（无 gateway 时 Gateway 服务无法启动）
-    if current.get("gateway").is_none() {
+/// 读取 openclaw.json + wizard.json 合并返回给前端
+#[tauri::command]
+fn read_openclaw_config() -> Result<serde_json::Value, String> {
+    let dir = openclaw_dir()?;
+    let mut config = read_json_file(&dir.join("openclaw.json"));
+    let wizard = read_json_file(&dir.join("wizard.json"));
+
+    // 旧格式迁移：清理 openclaw.json 中的非法顶层 key
+    let migrated = migrate_legacy_config(&mut config, &dir);
+    if migrated {
+        let _ = std::fs::write(
+            dir.join("openclaw.json"),
+            serde_json::to_string_pretty(&config).unwrap_or_default(),
+        );
+    }
+
+    // 将 wizard 数据挂在 _wizard 下返回给前端（仅内存中，不写入 openclaw.json）
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert("_wizard".to_string(), wizard);
+    }
+    Ok(config)
+}
+
+/// 写入配置：Gateway 认识的 key 写 openclaw.json，_wizard 写 wizard.json
+#[tauri::command]
+fn write_openclaw_config(patch: serde_json::Value) -> Result<(), String> {
+    let _guard = CONFIG_LOCK.lock().map_err(|e| format!("配置锁获取失败: {e}"))?;
+    let dir = openclaw_dir()?;
+    let oc_path = dir.join("openclaw.json");
+    let wz_path = dir.join("wizard.json");
+
+    let mut oc_config = read_json_file(&oc_path);
+    let mut wz_config = read_json_file(&wz_path);
+
+    // 确保 gateway 基础配置存在
+    if oc_config.get("gateway").is_none() {
         let meta = service_ctrl::read_meta();
         let port = meta.as_ref().map(|m| m.service_port).unwrap_or(18789);
-        current["gateway"] = serde_json::json!({
+        oc_config["gateway"] = serde_json::json!({
             "port": port,
             "mode": "local",
-            "auth": { "password": "" }
+            "auth": { "mode": "password", "password": "" }
         });
     }
 
-    // 旧格式迁移：顶层 ai → gateway.ai（Gateway 严格模式不接受未知顶层 key）
-    migrate_legacy_config(&mut current);
+    // 分离 patch：_wizard 部分写 wizard.json，其余写 openclaw.json
+    if let Some(patch_obj) = patch.as_object() {
+        for (key, value) in patch_obj {
+            if key == "_wizard" {
+                json_deep_merge(&mut wz_config, value);
+            } else if GATEWAY_ALLOWED_KEYS.contains(&key.as_str()) {
+                // 只允许 Gateway 白名单 key 写入 openclaw.json
+                if let Some(oc_obj) = oc_config.as_object_mut() {
+                    if value.is_null() {
+                        oc_obj.remove(key);
+                    } else if value.is_object() && oc_obj.get(key).map_or(false, |v| v.is_object()) {
+                        if let Some(existing) = oc_obj.get_mut(key) {
+                            json_deep_merge(existing, value);
+                        }
+                    } else {
+                        oc_obj.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            // 非白名单 key 静默丢弃，不写入 openclaw.json
+        }
+    }
 
-    json_deep_merge(&mut current, &patch);
-
-    // 迁移后再次清理（patch 可能又带了旧格式）
-    migrate_legacy_config(&mut current);
-
-    // 写入前验证 JSON 完整性
-    let output = serde_json::to_string_pretty(&current).map_err(|e| e.to_string())?;
-    // 确保能被重新解析（防止损坏）
-    serde_json::from_str::<serde_json::Value>(&output)
-        .map_err(|e| format!("配置序列化后校验失败: {e}"))?;
-
-    std::fs::write(&path, output).map_err(|e| e.to_string())
+    std::fs::write(&oc_path, serde_json::to_string_pretty(&oc_config).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&wz_path, serde_json::to_string_pretty(&wz_config).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// 获取 Gateway 综合状态（健康、已配置的平台/AI 信息）
@@ -457,10 +486,14 @@ async fn get_gateway_status() -> serde_json::Value {
         .and_then(|d| serde_json::from_str::<serde_json::Value>(&d).ok())
         .unwrap_or(serde_json::json!({}));
 
-    // AI 配置嵌套在 gateway.ai 内
-    let gateway_obj = config.get("gateway");
-    let ai_provider = gateway_obj.and_then(|g| g.get("ai")).and_then(|a| a.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
-    let ai_model = gateway_obj.and_then(|g| g.get("ai")).and_then(|a| a.get("model")).and_then(|v| v.as_str()).unwrap_or("");
+    // AI 模型：agents.defaults.model（格式 "provider/model-id"）
+    let ai_model_full = config.get("agents")
+        .and_then(|a| a.get("defaults"))
+        .and_then(|d| d.get("model"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("");
+    // 从 "provider/model" 格式分离 provider 和 model
+    let (ai_provider, ai_model) = ai_model_full.split_once('/').unwrap_or(("", ai_model_full));
     let has_ai = !ai_provider.is_empty();
 
     // 检测已配置的聊天平台
@@ -481,32 +514,90 @@ async fn get_gateway_status() -> serde_json::Value {
     })
 }
 
-/// 旧格式迁移：将 Gateway 不认识的顶层 key 移到正确位置
-fn migrate_legacy_config(config: &mut serde_json::Value) {
+/// 旧格式迁移：移除 openclaw.json 中非白名单的顶层 key
+/// 将旧的 ai/disabledSkills/_wizard 等移到 wizard.json 或正确位置
+/// 返回是否有迁移发生
+fn migrate_legacy_config(config: &mut serde_json::Value, dir: &std::path::Path) -> bool {
+    let mut migrated = false;
     if let Some(obj) = config.as_object_mut() {
-        // 顶层 ai → gateway.ai（gateway 不存在时先创建）
-        if let Some(ai) = obj.remove("ai") {
-            if ai.is_object() {
-                let gw = obj.entry("gateway".to_string())
-                    .or_insert_with(|| serde_json::json!({}));
-                if let Some(gw_obj) = gw.as_object_mut() {
-                    if !gw_obj.contains_key("ai") {
-                        gw_obj.insert("ai".to_string(), ai);
+        let mut wizard_patch = serde_json::Map::new();
+
+        // 收集需要从 openclaw.json 移除的非白名单 key
+        let keys_to_remove: Vec<String> = obj.keys()
+            .filter(|k| !GATEWAY_ALLOWED_KEYS.contains(&k.as_str()))
+            .cloned()
+            .collect();
+
+        for key in &keys_to_remove {
+            if let Some(val) = obj.remove(key) {
+                migrated = true;
+                match key.as_str() {
+                    // 旧的顶层 ai 配置 → 迁移到 agents + env
+                    "ai" => {
+                        if let Some(ai_obj) = val.as_object() {
+                            let provider = ai_obj.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                            let model = ai_obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
+                            let base_url = ai_obj.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
+                            let api_key = ai_obj.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+                            if !model.is_empty() {
+                                let model_id = if model.contains('/') { model.to_string() } else { format!("{}/{}", provider, model) };
+                                obj.insert("agents".to_string(), serde_json::json!({ "defaults": { "model": model_id } }));
+                                if !base_url.is_empty() && !api_key.is_empty() {
+                                    let env_key = format!("{}_API_KEY", provider.to_uppercase());
+                                    obj.insert("models".to_string(), serde_json::json!({
+                                        "providers": { provider: { "baseUrl": base_url, "apiKey": format!("${{{}}}", env_key) } }
+                                    }));
+                                    obj.insert("env".to_string(), serde_json::json!({ env_key: api_key }));
+                                }
+                            }
+                        }
+                    }
+                    // disabledSkills / _wizard → wizard.json
+                    "disabledSkills" => { wizard_patch.insert("disabledSkills".to_string(), val); }
+                    "_wizard" => {
+                        if let Some(w) = val.as_object() {
+                            for (k, v) in w { wizard_patch.insert(k.clone(), v.clone()); }
+                        }
+                    }
+                    _ => {} // 其他未知 key 直接丢弃
+                }
+            }
+        }
+
+        // 也检查 gateway 内部的非法 key（如旧的 gateway.ai）
+        if let Some(gw) = obj.get_mut("gateway").and_then(|g| g.as_object_mut()) {
+            if let Some(ai) = gw.remove("ai") {
+                migrated = true;
+                // 从 gateway.ai 迁移同上逻辑
+                if let Some(ai_obj) = ai.as_object() {
+                    let provider = ai_obj.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                    let model = ai_obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
+                    let base_url = ai_obj.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
+                    let api_key = ai_obj.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+                    if !model.is_empty() && !obj.contains_key("agents") {
+                        let model_id = if model.contains('/') { model.to_string() } else { format!("{}/{}", provider, model) };
+                        obj.insert("agents".to_string(), serde_json::json!({ "defaults": { "model": model_id } }));
+                        if !base_url.is_empty() && !api_key.is_empty() {
+                            let env_key = format!("{}_API_KEY", provider.to_uppercase());
+                            obj.insert("models".to_string(), serde_json::json!({
+                                "providers": { provider: { "baseUrl": base_url, "apiKey": format!("${{{}}}", env_key) } }
+                            }));
+                            obj.insert("env".to_string(), serde_json::json!({ env_key: api_key }));
+                        }
                     }
                 }
             }
         }
-        // 顶层 disabledSkills → _wizard.disabledSkills
-        if let Some(ds) = obj.remove("disabledSkills") {
-            let wizard = obj.entry("_wizard".to_string())
-                .or_insert_with(|| serde_json::json!({}));
-            if let Some(w) = wizard.as_object_mut() {
-                if !w.contains_key("disabledSkills") {
-                    w.insert("disabledSkills".to_string(), ds);
-                }
-            }
+
+        // 写入 wizard.json（如果有迁移数据）
+        if !wizard_patch.is_empty() {
+            let wz_path = dir.join("wizard.json");
+            let mut wz = read_json_file(&wz_path);
+            json_deep_merge(&mut wz, &serde_json::Value::Object(wizard_patch));
+            let _ = std::fs::write(&wz_path, serde_json::to_string_pretty(&wz).unwrap_or_default());
         }
     }
+    migrated
 }
 
 /// JSON 深度合并（patch 中的值覆盖 target 对应 key，递归合并对象）
