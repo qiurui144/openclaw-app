@@ -141,35 +141,174 @@ async fn open_url(url: String) -> Result<(), String> {
     }).await.unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// 完整卸载（逐步执行 + 验证），返回每步结果
 #[tauri::command]
-fn run_uninstall(install_path: String) -> Result<(), String> {
+async fn run_uninstall(install_path: String, service_port: Option<u16>) -> Result<Vec<UninstallStepResult>, String> {
     use std::path::PathBuf;
-    use std::process::Command;
 
-    #[cfg(unix)]
-    let script = PathBuf::from(&install_path).join("uninstall.sh");
-    #[cfg(windows)]
-    let script = PathBuf::from(&install_path).join("uninstall.bat");
-    #[cfg(not(any(unix, windows)))]
-    return Err("不支持的操作系统".to_string());
+    let mut results = Vec::new();
+    let port = service_port.unwrap_or(18789);
 
-    if !script.exists() {
-        return Err(format!(
-            "卸载脚本不存在：{}，请手动删除安装目录",
-            script.display()
-        ));
+    // 1. 停止服务
+    match service_ctrl::stop() {
+        Ok(()) => results.push(UninstallStepResult { step: "停止服务".into(), success: true, detail: "已停止".into() }),
+        Err(e) => results.push(UninstallStepResult { step: "停止服务".into(), success: false, detail: e.to_string() }),
+    }
+    // 等待端口释放（轮询，最多 10 秒）
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let still_open = tokio::time::timeout(
+            std::time::Duration::from_millis(300),
+            tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)),
+        ).await.map(|r| r.is_ok()).unwrap_or(false);
+        if !still_open { break; }
     }
 
-    #[cfg(unix)]
-    let status = Command::new("bash").arg(&script).status();
-    #[cfg(windows)]
-    let status = Command::new("cmd").args(["/C", &script.to_string_lossy()]).status();
+    // 2. 移除服务注册
+    let svc_result = remove_service_registration();
+    results.push(UninstallStepResult {
+        step: "移除服务注册".into(),
+        success: svc_result.is_ok(),
+        detail: svc_result.unwrap_or_else(|e| e.to_string()),
+    });
 
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("卸载脚本退出码：{}", s.code().unwrap_or(-1))),
-        Err(e) => Err(format!("执行卸载脚本失败：{e}")),
+    // 3. 删除安装目录（安全校验：确认是 OpenClaw 安装目录）
+    let install = PathBuf::from(&install_path);
+    if install.exists() {
+        let is_openclaw_dir = install.join("openclaw_pkg").join("package").join("openclaw.mjs").exists()
+            || install.join("openclaw_pkg").exists()
+            || install.join("uninstall.sh").exists()
+            || install.join("uninstall.bat").exists();
+        if !is_openclaw_dir {
+            results.push(UninstallStepResult {
+                step: "删除安装目录".into(),
+                success: false,
+                detail: format!("安全校验失败：{} 不是有效的 OpenClaw 安装目录（缺少特征文件）", install_path),
+            });
+        } else {
+            match std::fs::remove_dir_all(&install) {
+                Ok(()) => results.push(UninstallStepResult { step: "删除安装目录".into(), success: true, detail: format!("{} 已删除", install_path) }),
+                Err(e) => results.push(UninstallStepResult { step: "删除安装目录".into(), success: false, detail: e.to_string() }),
+            }
+        }
+    } else {
+        results.push(UninstallStepResult { step: "删除安装目录".into(), success: true, detail: "目录不存在，跳过".into() });
     }
+
+    // 4. 删除用户配置目录 ~/.openclaw
+    if let Some(home) = dirs::home_dir() {
+        let config_dir = home.join(".openclaw");
+        if config_dir.exists() {
+            match std::fs::remove_dir_all(&config_dir) {
+                Ok(()) => results.push(UninstallStepResult { step: "删除配置目录".into(), success: true, detail: "~/.openclaw 已删除".into() }),
+                Err(e) => results.push(UninstallStepResult { step: "删除配置目录".into(), success: false, detail: e.to_string() }),
+            }
+        } else {
+            results.push(UninstallStepResult { step: "删除配置目录".into(), success: true, detail: "不存在，跳过".into() });
+        }
+    }
+
+    // 5. 验证：目录不存在 + 端口已释放
+    let dir_gone = !PathBuf::from(&install_path).exists();
+    let port_free = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)),
+    ).await.map(|r| r.is_err()).unwrap_or(true);
+
+    results.push(UninstallStepResult {
+        step: "验证卸载".into(),
+        success: dir_gone && port_free,
+        detail: format!(
+            "安装目录{}，端口 {} {}",
+            if dir_gone { "已清除" } else { "仍存在" },
+            port,
+            if port_free { "已释放" } else { "仍被占用" }
+        ),
+    });
+
+    Ok(results)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct UninstallStepResult {
+    step: String,
+    success: bool,
+    detail: String,
+}
+
+/// 移除系统服务注册（systemd / launchd / schtasks），返回实际操作结果
+fn remove_service_registration() -> Result<String, String> {
+    let mut issues: Vec<String> = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        let elevated = system_check::is_elevated();
+        if elevated {
+            if let Err(e) = Command::new("systemctl").args(["disable", "openclaw.service"]).status() {
+                issues.push(format!("systemctl disable 失败: {e}"));
+            }
+            let unit_path = std::path::PathBuf::from("/etc/systemd/system/openclaw.service");
+            if unit_path.exists() {
+                if let Err(e) = std::fs::remove_file(&unit_path) {
+                    issues.push(format!("删除 unit 文件失败: {e}"));
+                }
+            }
+            let _ = Command::new("systemctl").args(["daemon-reload"]).status();
+        } else {
+            let _ = Command::new("timeout").args(["10", "systemctl", "--user", "disable", "openclaw.service"]).status();
+            if let Some(home) = dirs::home_dir() {
+                let unit_path = home.join(".config/systemd/user/openclaw.service");
+                if unit_path.exists() {
+                    if let Err(e) = std::fs::remove_file(&unit_path) {
+                        issues.push(format!("删除 unit 文件失败: {e}"));
+                    }
+                }
+            }
+            let _ = Command::new("timeout").args(["10", "systemctl", "--user", "daemon-reload"]).status();
+        }
+        return if issues.is_empty() {
+            Ok("systemd 服务已移除".into())
+        } else {
+            Err(format!("systemd 服务移除部分失败: {}", issues.join("; ")))
+        };
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        let elevated = system_check::is_elevated();
+        let plist = if elevated {
+            std::path::PathBuf::from("/Library/LaunchDaemons/com.openclaw.gateway.plist")
+        } else {
+            dirs::home_dir().unwrap_or_default().join("Library/LaunchAgents/com.openclaw.gateway.plist")
+        };
+        if plist.exists() {
+            let unload_ok = Command::new("launchctl").args(["unload", "-w", plist.to_str().unwrap_or("")])
+                .status().map(|s| s.success()).unwrap_or(false);
+            if !unload_ok { issues.push("launchctl unload 失败".into()); }
+            if let Err(e) = std::fs::remove_file(&plist) {
+                issues.push(format!("删除 plist 失败: {e}"));
+            }
+        }
+        return if issues.is_empty() {
+            Ok("launchd 服务已移除".into())
+        } else {
+            Err(format!("launchd 服务移除部分失败: {}", issues.join("; ")))
+        };
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let ok = Command::new("schtasks").args(["/Delete", "/TN", "OpenClaw Gateway", "/F"])
+            .status().map(|s| s.success()).unwrap_or(false);
+        return if ok {
+            Ok("计划任务已移除".into())
+        } else {
+            Err("计划任务移除失败（可能不存在或权限不足）".into())
+        };
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    Err("不支持的平台".into())
 }
 
 #[tauri::command]
@@ -177,6 +316,12 @@ fn read_deploy_meta() -> Option<serde_json::Value> {
     let path = dirs::home_dir()?.join(".openclaw/deploy_meta.json");
     let data = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&data).ok()
+}
+
+/// 校验安装路径（黑名单 + 可写 + 磁盘空间）
+#[tauri::command]
+fn validate_install_path(path: String) -> Result<(), String> {
+    deploy::validate_install_path(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -201,6 +346,102 @@ fn get_default_install_path() -> String {
         dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "~".to_string()));
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     return "/opt/openclaw".to_string();
+}
+
+// ── 简化配置页面命令（读写 openclaw.json）──────────────────────────────────
+
+/// 读取 ~/.openclaw/openclaw.json 完整内容
+#[tauri::command]
+fn read_openclaw_config() -> Result<serde_json::Value, String> {
+    let path = dirs::home_dir()
+        .ok_or("无法获取 home 目录")?
+        .join(".openclaw/openclaw.json");
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&data).map_err(|e| format!("配置文件格式错误: {e}"))
+}
+
+/// 写入 ~/.openclaw/openclaw.json（深度合并，不覆盖未传字段）
+#[tauri::command]
+fn write_openclaw_config(patch: serde_json::Value) -> Result<(), String> {
+    let dir = dirs::home_dir()
+        .ok_or("无法获取 home 目录")?
+        .join(".openclaw");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("openclaw.json");
+
+    let mut current: serde_json::Value = if path.exists() {
+        let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&data).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    json_deep_merge(&mut current, &patch);
+
+    std::fs::write(&path, serde_json::to_string_pretty(&current).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+/// 获取 Gateway 综合状态（健康、已配置的平台/AI 信息）
+#[tauri::command]
+async fn get_gateway_status() -> serde_json::Value {
+    let meta = service_ctrl::read_meta();
+    let port = meta.as_ref().map(|m| m.service_port).unwrap_or(18789);
+
+    // 检测服务是否运行
+    let status = if let Some(ref m) = meta {
+        service_ctrl::check_status(m.service_port).await
+    } else {
+        service_ctrl::ServiceStatus::Stopped
+    };
+    let running = status == service_ctrl::ServiceStatus::Running;
+
+    // 读取配置文件获取已配置的平台和 AI 信息
+    let config = dirs::home_dir()
+        .and_then(|h| std::fs::read_to_string(h.join(".openclaw/openclaw.json")).ok())
+        .and_then(|d| serde_json::from_str::<serde_json::Value>(&d).ok())
+        .unwrap_or(serde_json::json!({}));
+
+    let ai_provider = config.get("ai").and_then(|a| a.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
+    let ai_model = config.get("ai").and_then(|a| a.get("model")).and_then(|v| v.as_str()).unwrap_or("");
+    let has_ai = !ai_provider.is_empty();
+
+    // 检测已配置的聊天平台
+    let channels = config.get("channels").cloned().unwrap_or(serde_json::json!({}));
+
+    serde_json::json!({
+        "running": running,
+        "port": port,
+        "has_meta": meta.is_some(),
+        "version": meta.as_ref().map(|m| m.version.as_str()).unwrap_or(""),
+        "install_path": meta.as_ref().map(|m| m.install_path.as_str()).unwrap_or(""),
+        "ai": {
+            "configured": has_ai,
+            "provider": ai_provider,
+            "model": ai_model,
+        },
+        "channels": channels,
+    })
+}
+
+/// JSON 深度合并（patch 中的值覆盖 target 对应 key，递归合并对象）
+fn json_deep_merge(target: &mut serde_json::Value, patch: &serde_json::Value) {
+    if let (Some(target_obj), Some(patch_obj)) = (target.as_object_mut(), patch.as_object()) {
+        for (key, value) in patch_obj {
+            if value.is_null() {
+                target_obj.remove(key);
+            } else if value.is_object() && target_obj.get(key).map_or(false, |v| v.is_object()) {
+                json_deep_merge(target_obj.get_mut(key).unwrap(), value);
+            } else {
+                target_obj.insert(key.clone(), value.clone());
+            }
+        }
+    } else {
+        *target = patch.clone();
+    }
 }
 
 // ── 服务控制命令（供托盘和 FinishPage 使用）──────────────────────────────────
@@ -433,7 +674,11 @@ fn main() {
             open_url,
             run_uninstall,
             read_deploy_meta,
+            validate_install_path,
             get_default_install_path,
+            read_openclaw_config,
+            write_openclaw_config,
+            get_gateway_status,
             service_status,
             service_start,
             service_stop,

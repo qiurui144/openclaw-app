@@ -18,8 +18,11 @@
         <label>安装目录</label>
         <div class="input-row">
           <input type="text" v-model="config.installPath" :placeholder="defaultPath" @input="validate" />
+          <button class="btn-secondary" @click="validatePath" :disabled="validating">{{ validating ? "检测中…" : "检测" }}</button>
         </div>
-        <span class="hint">推荐路径：{{ defaultPath }}</span>
+        <span class="hint" v-if="!pathError">推荐路径：{{ defaultPath }}</span>
+        <span class="hint path-error" v-if="pathError">{{ pathError }}</span>
+        <span class="hint path-ok" v-if="pathOk">路径可用，磁盘空间充足</span>
       </div>
 
       <div class="field">
@@ -54,6 +57,9 @@ const config = useConfigStore();
 const wizard = useWizardStore();
 const { next } = useWizardNav();
 const defaultPath = ref("");
+const validating = ref(false);
+const pathError = ref("");
+const pathOk = ref(false);
 
 onMounted(async () => {
   try {
@@ -65,7 +71,26 @@ onMounted(async () => {
 });
 
 function validate() {
+  pathError.value = "";
+  pathOk.value = false;
   wizard.setReady(!!config.installPath.trim());
+}
+
+async function validatePath() {
+  const p = config.installPath.trim();
+  if (!p) { pathError.value = "路径不能为空"; return; }
+  validating.value = true;
+  pathError.value = "";
+  pathOk.value = false;
+  try {
+    await tauri.validateInstallPath(p);
+    pathOk.value = true;
+  } catch (e) {
+    pathError.value = String(e);
+    pathOk.value = false;
+  } finally {
+    validating.value = false;
+  }
 }
 
 function handleNext() { next(); }
@@ -84,5 +109,7 @@ input[type="text"] {
   border: 1px solid var(--color-border); border-radius: var(--radius); font-size: 13px;
 }
 .hint { font-size: 12px; color: var(--color-muted); }
+.path-error { color: var(--color-error); font-weight: 500; }
+.path-ok { color: var(--color-success); font-weight: 500; }
 .hint-sm { font-size: 12px; color: var(--color-muted); margin-left: 24px; }
 </style>

@@ -41,9 +41,18 @@
       </div>
 
       <!-- 执行进度 -->
-      <div class="progress-box" v-if="running">
+      <div class="progress-box" v-if="running && !steps.length">
         <div class="spinner"></div>
         <span>正在卸载，请稍候…</span>
+      </div>
+
+      <!-- 卸载步骤清单 -->
+      <div class="steps-list" v-if="steps.length">
+        <div v-for="(s, i) in steps" :key="i" class="step-row" :class="{ ok: s.success, fail: !s.success }">
+          <span class="step-icon">{{ s.success ? "✅" : "❌" }}</span>
+          <span class="step-name">{{ s.step }}</span>
+          <span class="step-detail">{{ s.detail }}</span>
+        </div>
       </div>
 
       <!-- 成功 -->
@@ -91,10 +100,13 @@ import { tauri } from "@/composables/useTauri";
 const wizard = useWizardStore();
 const { back } = useWizardNav();
 
+interface UninstallStep { step: string; success: boolean; detail: string; }
+
 const confirmText = ref("");
 const running = ref(false);
 const done = ref(false);
 const error = ref<string | null>(null);
+const steps = ref<UninstallStep[]>([]);
 
 onMounted(() => { wizard.setReady(true); });
 
@@ -102,9 +114,16 @@ async function doUninstall() {
   if (!wizard.existingPath) return;
   running.value = true;
   error.value = null;
+  steps.value = [];
   try {
-    await tauri.runUninstall(wizard.existingPath);
-    done.value = true;
+    const results = await tauri.runUninstall(wizard.existingPath);
+    steps.value = results;
+    const allOk = results.every((s) => s.success);
+    if (allOk) {
+      done.value = true;
+    } else {
+      error.value = results.filter((s) => !s.success).map((s) => `${s.step}: ${s.detail}`).join("; ");
+    }
   } catch (e: unknown) {
     error.value = String(e);
   } finally {
@@ -187,6 +206,17 @@ h2 { font-size: 20px; font-weight: 700; }
   font-size: 13px; color: #991b1b;
 }
 .err-hint { font-size: 12px; color: var(--color-muted); }
+
+.steps-list {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius); padding: 14px 16px;
+}
+.step-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.step-icon { flex-shrink: 0; }
+.step-name { font-weight: 500; min-width: 100px; }
+.step-detail { color: var(--color-muted); flex: 1; }
+.step-row.fail .step-detail { color: var(--color-error); }
 
 .action-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .spacer { flex: 1; }

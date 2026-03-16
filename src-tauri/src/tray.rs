@@ -1,6 +1,6 @@
 /// 系统托盘模块：图标、菜单、30s 轮询服务状态
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewUrl};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use crate::service_ctrl::{DeployMeta, ServiceStatus};
@@ -76,6 +76,7 @@ fn build_menu(
             &MenuItem::with_id(handle, "restart", "🔄 重启",        has_meta,                None::<&str>)?,
             &PredefinedMenuItem::separator(handle)?,
             &MenuItem::with_id(handle, "console", "🌐 打开控制台",  has_meta,                None::<&str>)?,
+            &MenuItem::with_id(handle, "simple",  "⚙ 简化配置",   has_meta,                None::<&str>)?,
             &PredefinedMenuItem::separator(handle)?,
             &MenuItem::with_id(handle, "wizard",  "🔧 部署向导",   true,                    None::<&str>)?,
             &PredefinedMenuItem::separator(handle)?,
@@ -130,6 +131,9 @@ fn handle_menu(app: &AppHandle, id: &str) {
             if let Some(m) = meta {
                 let _ = open::that(format!("http://127.0.0.1:{}", m.service_port));
             }
+        }
+        "simple" => {
+            open_simple_dashboard(app);
         }
         "wizard" => {
             if let Some(w) = app.get_webview_window("main") {
@@ -192,5 +196,29 @@ pub async fn refresh_tray_icon(app: &AppHandle) {
         if let Ok(menu) = build_menu(app, is_running, has_meta) {
             let _ = tray.set_menu(Some(menu));
         }
+    }
+}
+
+// ── 简化配置窗口 ────────────────────────────────────────────────────────────────
+
+/// 打开或聚焦简化配置页面（第二窗口）
+fn open_simple_dashboard(app: &AppHandle) {
+    // 若已存在，直接显示并聚焦
+    if let Some(w) = app.get_webview_window("simple") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    // 动态创建新窗口，加载 /simple/ 路由
+    let url = WebviewUrl::App("/simple/".into());
+    match tauri::webview::WebviewWindowBuilder::new(app, "simple", url)
+        .title("OpenClaw 配置")
+        .inner_size(860.0, 640.0)
+        .center()
+        .resizable(true)
+        .build()
+    {
+        Ok(_) => {}
+        Err(e) => eprintln!("[tray] 创建简化配置窗口失败: {e}"),
     }
 }
