@@ -623,11 +623,10 @@ fn write_main_config(config: &DeployConfig) -> Result<()> {
         gateway["publicUrl"] = serde_json::json!(format!("https://{}", domain));
     }
 
-    let mut cfg = serde_json::json!({ "gateway": gateway });
-
+    // AI 配置嵌入 gateway 内部（Gateway 严格模式不接受未知的顶层 key）
     if let Some(ai) = &config.ai_config {
         if !ai.api_key.is_empty() {
-            cfg["ai"] = serde_json::json!({
+            gateway["ai"] = serde_json::json!({
                 "provider": ai.provider,
                 "baseUrl": ai.base_url,
                 "apiKey": ai.api_key,
@@ -635,6 +634,8 @@ fn write_main_config(config: &DeployConfig) -> Result<()> {
             });
         }
     }
+
+    let cfg = serde_json::json!({ "gateway": gateway });
 
     std::fs::write(
         config_dir.join("openclaw.json"),
