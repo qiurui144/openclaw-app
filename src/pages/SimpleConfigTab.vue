@@ -224,14 +224,12 @@ onMounted(async () => {
       if (providers?.[ai.provider]) {
         ai.baseUrl = providers[ai.provider].baseUrl || "";
       }
-      // API Key 优先从 auth.profiles 读取（新格式）
-      const authCfg = cfg.auth as Record<string, unknown> | undefined;
-      const profiles = authCfg?.profiles as Record<string, Record<string, string>> | undefined;
-      const profileKey = `${ai.provider}:default`;
-      if (profiles?.[profileKey]) {
-        ai.apiKey = profiles[profileKey].apiKey || "";
-      } else {
-        // 回落：从旧的 env 段读取
+      // API Key 从 models.providers 读取（官方格式）
+      if (providers?.[ai.provider]) {
+        ai.apiKey = providers[ai.provider].apiKey || "";
+      }
+      // 回落：从旧的 env 段读取
+      if (!ai.apiKey) {
         const envCfg = cfg.env as Record<string, string> | undefined;
         const envKey = `${ai.provider.toUpperCase()}_API_KEY`;
         if (envCfg?.[envKey]) {
@@ -310,26 +308,24 @@ async function testAiConnection() {
 async function saveAiConfig() {
   saving.value = true;
   try {
-    // Gateway 官方格式：agents.defaults.model.primary + auth.profiles
+    // 官方格式：agents.defaults.model.primary + models.providers.*.apiKey
     const modelId = ai.model.includes("/") ? ai.model : `${ai.provider}/${ai.model}`;
-    const profileKey = `${ai.provider}:default`;
+    const baseUrl = ai.baseUrl || AI_PROVIDERS.find(p => p.value === ai.provider)?.baseUrl || "";
+    const providerEntry: Record<string, unknown> = {
+      apiKey: ai.apiKey,
+      api: "openai-completions",
+      models: [{ id: ai.model, name: ai.model }],
+    };
+    if (baseUrl) {
+      providerEntry.baseUrl = baseUrl;
+    }
     const patch: Record<string, unknown> = {
       agents: { defaults: { model: { primary: modelId } } },
-      auth: {
-        profiles: {
-          [profileKey]: { provider: ai.provider, mode: "api_key", apiKey: ai.apiKey },
-        },
+      models: {
+        mode: "merge",
+        providers: { [ai.provider]: providerEntry },
       },
     };
-    // 仅自定义 baseUrl 时添加 models.providers
-    const baseUrl = ai.baseUrl || AI_PROVIDERS.find(p => p.value === ai.provider)?.baseUrl || "";
-    if (baseUrl && ai.provider === "custom") {
-      patch.models = {
-        providers: {
-          [ai.provider]: { baseUrl, api: "openai-completions" },
-        },
-      };
-    }
     await tauri.writeOpenclawConfig(patch);
     showSaveMsg(true, "AI 配置已保存");
   } catch (e) {

@@ -810,7 +810,8 @@ fn write_main_config_to(config_dir: PathBuf, config: &DeployConfig) -> Result<()
 
     let mut cfg = serde_json::json!({ "gateway": gateway });
 
-    // AI 模型配置：auth.profiles + agents.defaults.model.primary（Gateway 官方格式）
+    // AI 模型配置：models.providers + agents.defaults.model.primary
+    // 参考官方 onboard 生成格式：apiKey 直接放在 models.providers 内
     if let Some(ai) = &config.ai_config {
         if !ai.api_key.is_empty() {
             let model_id = if ai.model.contains('/') {
@@ -818,36 +819,33 @@ fn write_main_config_to(config_dir: PathBuf, config: &DeployConfig) -> Result<()
             } else {
                 format!("{}/{}", ai.provider, ai.model)
             };
+            // 从 model_id 提取 provider 前缀和裸模型名
+            let (prov_key, bare_model) = model_id.split_once('/')
+                .unwrap_or((&ai.provider, &ai.model));
 
-            // agents.defaults.model 使用对象格式 { primary: "provider/model" }
             cfg["agents"] = serde_json::json!({
                 "defaults": {
                     "model": { "primary": model_id }
                 }
             });
 
-            // API Key 存入 auth.profiles（Gateway 官方推荐格式）
-            let profile_key = format!("{}:default", ai.provider);
-            let profile = serde_json::json!({
-                "provider": ai.provider,
-                "mode": "api_key",
+            // models.providers：apiKey 直接内嵌、显式声明模型列表
+            let base_url = if ai.base_url.is_empty() { None } else { Some(&ai.base_url) };
+            let mut provider = serde_json::json!({
                 "apiKey": ai.api_key,
+                "api": "openai-completions",
+                "models": [{
+                    "id": bare_model,
+                    "name": bare_model,
+                }]
             });
-            cfg["auth"] = serde_json::json!({
-                "profiles": { profile_key: profile }
-            });
-
-            // 自定义 baseUrl 时添加到 models.providers（仅用于自定义/代理端点）
-            if !ai.base_url.is_empty() {
-                cfg["models"] = serde_json::json!({
-                    "providers": {
-                        ai.provider.clone(): {
-                            "baseUrl": ai.base_url,
-                            "api": "openai-completions",
-                        }
-                    }
-                });
+            if let Some(url) = base_url {
+                provider["baseUrl"] = serde_json::json!(url);
             }
+            cfg["models"] = serde_json::json!({
+                "mode": "merge",
+                "providers": { prov_key: provider }
+            });
         }
     }
 
@@ -1520,7 +1518,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_main_config_auth_profiles_format() {
+    fn test_write_main_config_models_providers_format() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config_with_ai("deepseek", "deepseek-chat", "sk-test123", "https://api.deepseek.com/v1");
         write_main_config_to(dir.path().to_path_buf(), &config).unwrap();
@@ -1528,17 +1526,20 @@ mod tests {
         let content = std::fs::read_to_string(dir.path().join("openclaw.json")).unwrap();
         let cfg: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-        // auth.profiles 应包含 deepseek:default
-        let profile = &cfg["auth"]["profiles"]["deepseek:default"];
-        assert_eq!(profile["provider"], "deepseek");
-        assert_eq!(profile["mode"], "api_key");
-        assert_eq!(profile["apiKey"], "sk-test123");
+        // apiKey 应直接在 models.providers 中
+        let provider = &cfg["models"]["providers"]["deepseek"];
+        assert_eq!(provider["apiKey"], "sk-test123");
+        assert_eq!(provider["baseUrl"], "https://api.deepseek.com/v1");
+        assert_eq!(provider["api"], "openai-completions");
+        assert_eq!(provider["models"][0]["id"], "deepseek-chat");
+        assert_eq!(cfg["models"]["mode"], "merge");
 
         // agents.defaults.model 应为对象格式
         assert_eq!(cfg["agents"]["defaults"]["model"]["primary"], "deepseek/deepseek-chat");
 
-        // 不应有 env 段
+        // 不应有 env 段或 auth.profiles
         assert!(cfg.get("env").is_none());
+        assert!(cfg.get("auth").is_none());
 
         // gateway.controlUi.enabled 应为 true
         assert_eq!(cfg["gateway"]["controlUi"]["enabled"], true);
@@ -1553,14 +1554,11 @@ mod tests {
         let content = std::fs::read_to_string(dir.path().join("openclaw.json")).unwrap();
         let cfg: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-        // models.providers 应包含 baseUrl 但没有 apiKey
+        // apiKey + baseUrl 都在 models.providers 中
         let provider = &cfg["models"]["providers"]["custom"];
         assert_eq!(provider["baseUrl"], "https://my-proxy.com/v1");
+        assert_eq!(provider["apiKey"], "sk-xxx");
         assert_eq!(provider["api"], "openai-completions");
-        assert!(provider.get("apiKey").is_none());
-
-        // apiKey 应在 auth.profiles 中
-        assert_eq!(cfg["auth"]["profiles"]["custom:default"]["apiKey"], "sk-xxx");
     }
 
     #[test]
