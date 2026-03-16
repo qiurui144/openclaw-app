@@ -26,13 +26,12 @@ npm run tauri dev    # 启动 Tauri 开发服务器（需要显示环境）
 ### 构建（每次打包必须同时产出 Lite + Full Bundle 两个版本）
 
 ```bash
-# 1. Lite 版（在线下载模式，~76MB AppImage）
+# 1. Lite 版（在线下载模式，不含 skills 预缓存和工具）
+bash scripts/fetch_resources.sh --lite   # 下载 Lite 资源
 OC_BUILD_BUNDLED=0 npm run tauri build
 
-# 2. 下载 Full Bundle 所需资源
-bash scripts/fetch_resources.sh
-
-# 3. Full Bundle 版（离线安装，~169MB AppImage）
+# 2. Full Bundle 版（全量离线安装：含 skills + qqbot + jq/rg/gh/ffmpeg 工具）
+bash scripts/fetch_resources.sh          # 下载全量资源（含静态工具二进制）
 OC_BUILD_BUNDLED=1 npm run tauri build -- --features bundled
 
 # AppImage 构建失败时加环境变量：

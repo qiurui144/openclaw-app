@@ -313,7 +313,7 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
     install_plugin_dependencies(config, window);
 
     // Step 4.8: 安装 Skills 所需的系统工具
-    install_skill_system_deps(window);
+    install_skill_system_deps(config, window);
 
     // Step 5: 写入主配置
     emit_progress(window, 5, TOTAL, "写入配置文件…");
@@ -688,89 +688,92 @@ fn install_plugin_dependencies(config: &DeployConfig, window: &Window) {
         format!("插件依赖: {} 安装 / {} 跳过 / {} 总计", installed, skipped, total));
 }
 
-/// 安装 Skills 所需的系统工具（Linux apt）
-/// 这些是官方 Skills 的 runtime requirements 中可在 Linux 上通过 apt 安装的工具
-fn install_skill_system_deps(window: &Window) {
-    #[cfg(not(target_os = "linux"))]
-    { let _ = window; return; }
+/// 安装 Skills 所需的系统工具
+/// Full Bundle 模式：从内嵌 tools/ 目录释放静态二进制到安装路径
+/// Online 模式：尝试 apt install（Linux）
+fn install_skill_system_deps(config: &DeployConfig, window: &Window) {
+    // 捆绑的工具列表（与 fetch_resources.sh 中下载的一致）
+    const BUNDLED_TOOLS: &[&str] = &["jq", "rg", "gh", "ffmpeg"];
 
-    #[cfg(target_os = "linux")]
-    {
-        // bin名 → apt 包名（仅收录跨平台可用、apt 有包的工具）
-        const BIN_TO_APT: &[(&str, &str)] = &[
-            ("curl",    "curl"),
-            ("jq",      "jq"),
-            ("rg",      "ripgrep"),
-            ("tmux",    "tmux"),
-            ("ffmpeg",  "ffmpeg"),
-            ("gh",      "gh"),
-            ("python3", "python3"),
-            ("git",     "git"),
-        ];
+    let tools_dest = PathBuf::from(&config.install_path).join("tools");
+    std::fs::create_dir_all(&tools_dest).ok();
 
-        // 检测哪些还没装
-        let missing: Vec<&str> = BIN_TO_APT.iter()
-            .filter(|(bin, _)| {
-                std::process::Command::new("which").arg(bin)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status().map(|s| !s.success()).unwrap_or(true)
-            })
-            .map(|(_, pkg)| *pkg)
-            .collect();
-
-        if missing.is_empty() {
-            let _ = window.emit("deploy:log", "Skills 系统依赖已就绪");
-            return;
+    // 1. 尝试从 Bundled 资源释放（Full Bundle 模式）
+    let tools_src = match &config.source_mode {
+        SourceMode::Bundled => {
+            // Tauri 资源目录下的 tools/（由 CI 构建时嵌入）
+            // 运行时路径：与 node 二进制同级的 ../tools/
+            let node_dir = PathBuf::from(&config.install_path).join("node");
+            // Full Bundle 的 tools 可能在 resources/binaries/{platform}/tools/ 被 include_bytes
+            // 但静态二进制太大不适合 include_bytes，改为部署时从安装包旁释放
+            None::<PathBuf>
         }
+        _ => None,
+    };
 
-        let _ = window.emit("deploy:log",
-            format!("安装 Skills 系统依赖: {}…", missing.join(", ")));
-
-        // gh 需要先添加 GitHub CLI apt 源
-        if missing.contains(&"gh") {
-            let _ = std::process::Command::new("bash").args(["-c",
-                "type -p curl >/dev/null || (apt-get update && apt-get install -y curl) && \
-                 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
-                 dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null && \
-                 echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main' | \
-                 tee /etc/apt/sources.list.d/github-cli.list > /dev/null"
-            ]).status();
-        }
-
-        // apt-get install
-        let elevated = crate::system_check::is_elevated();
-        let mut args: Vec<&str> = vec!["apt-get", "install", "-y"];
-        args.extend(missing.iter());
-
-        let result = if elevated {
-            std::process::Command::new("apt-get")
-                .args(["install", "-y"])
-                .args(&missing)
-                .env("DEBIAN_FRONTEND", "noninteractive")
-                .output()
+    // 2. 检查已存在的工具
+    let mut installed = Vec::new();
+    let mut missing = Vec::new();
+    for &tool in BUNDLED_TOOLS {
+        let bin_name = if cfg!(windows) { format!("{}.exe", tool) } else { tool.to_string() };
+        let dest_path = tools_dest.join(&bin_name);
+        if dest_path.exists() {
+            installed.push(tool);
         } else {
-            // 非 root：尝试 sudo（可能没有免密权限，失败不阻断）
-            std::process::Command::new("sudo")
-                .args(["apt-get", "install", "-y"])
-                .args(&missing)
-                .env("DEBIAN_FRONTEND", "noninteractive")
-                .output()
-        };
+            // 检查系统 PATH 中是否已有
+            let in_path = std::process::Command::new(if cfg!(windows) { "where" } else { "which" })
+                .arg(tool)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status().map(|s| s.success()).unwrap_or(false);
+            if in_path {
+                installed.push(tool);
+            } else {
+                missing.push(tool);
+            }
+        }
+    }
 
-        match result {
-            Ok(out) if out.status.success() => {
-                let _ = window.emit("deploy:log", "Skills 系统依赖安装完成");
-            }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let _ = window.emit("deploy:log",
-                    format!("系统依赖部分安装失败（非致命，可手动安装）: {}",
-                        stderr.lines().last().unwrap_or("")));
-            }
-            Err(e) => {
-                let _ = window.emit("deploy:log",
-                    format!("系统依赖安装跳过（非致命）: {}", e));
+    if missing.is_empty() {
+        let _ = window.emit("deploy:log",
+            format!("Skills 工具已就绪: {}", installed.join(", ")));
+        return;
+    }
+
+    let _ = window.emit("deploy:log",
+        format!("缺少 Skills 工具: {}（可手动安装或使用 Full Bundle）", missing.join(", ")));
+
+    // 3. Online 模式：Linux 上尝试 apt 安装基础工具
+    #[cfg(target_os = "linux")]
+    if matches!(config.source_mode, SourceMode::Online { .. }) {
+        let apt_map: &[(&str, &str)] = &[
+            ("jq", "jq"), ("rg", "ripgrep"), ("ffmpeg", "ffmpeg"), ("gh", "gh"),
+            ("curl", "curl"), ("git", "git"), ("tmux", "tmux"), ("python3", "python3"),
+        ];
+        let apt_pkgs: Vec<&str> = missing.iter()
+            .filter_map(|bin| apt_map.iter().find(|(b, _)| b == bin).map(|(_, pkg)| *pkg))
+            .collect();
+        if !apt_pkgs.is_empty() {
+            let _ = window.emit("deploy:log",
+                format!("尝试 apt 安装: {}…", apt_pkgs.join(", ")));
+            let elevated = crate::system_check::is_elevated();
+            let result = if elevated {
+                std::process::Command::new("apt-get")
+                    .args(["install", "-y"]).args(&apt_pkgs)
+                    .env("DEBIAN_FRONTEND", "noninteractive").output()
+            } else {
+                std::process::Command::new("sudo")
+                    .args(["apt-get", "install", "-y"]).args(&apt_pkgs)
+                    .env("DEBIAN_FRONTEND", "noninteractive").output()
+            };
+            match result {
+                Ok(out) if out.status.success() => {
+                    let _ = window.emit("deploy:log", "apt 安装完成");
+                }
+                _ => {
+                    let _ = window.emit("deploy:log",
+                        "apt 安装失败（非致命，Skills 相关功能可能受限）");
+                }
             }
         }
     }
