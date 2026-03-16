@@ -65,14 +65,10 @@ let adminPassword = "";
 
 onMounted(async () => {
   try {
+    const auth = await tauri.getChatAuth();
+    port = auth.port;
+    adminPassword = auth.password;
     const status = await tauri.getGatewayStatus();
-    port = status.port;
-    // 从配置读取密码（用于 WebSocket 认证）
-    const cfg = await tauri.readOpenclawConfig();
-    const gw = cfg.gateway as Record<string, unknown> | undefined;
-    if (gw?.auth && typeof gw.auth === "object") {
-      adminPassword = (gw.auth as Record<string, string>).password || "";
-    }
     if (status.running) {
       connect();
     }

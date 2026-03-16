@@ -64,6 +64,8 @@ export const tauri = {
     ai: { configured: boolean; provider: string; model: string };
     channels: Record<string, unknown>;
   }>("get_gateway_status"),
+  testAiConnection: (baseUrl: string, apiKey: string) => invoke<string>("test_ai_connection", { baseUrl, apiKey }),
+  getChatAuth: () => invoke<{ port: number; password: string }>("get_chat_auth"),
   // 服务控制（托盘 + FinishPage 共用）
   serviceStatus: () => invoke<"running" | "stopped" | "unknown">("service_status"),
   serviceStart: () => invoke<void>("service_start"),

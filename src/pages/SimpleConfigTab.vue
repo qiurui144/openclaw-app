@@ -260,17 +260,10 @@ async function testAiConnection() {
   testing.value = true;
   aiTestResult.value = null;
   try {
-    const resp = await fetch(`${ai.baseUrl}/models`, {
-      headers: { Authorization: `Bearer ${ai.apiKey}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (resp.ok) {
-      aiTestResult.value = { ok: true, msg: "连接成功" };
-    } else {
-      aiTestResult.value = { ok: false, msg: `HTTP ${resp.status}` };
-    }
+    const msg = await tauri.testAiConnection(ai.baseUrl, ai.apiKey);
+    aiTestResult.value = { ok: true, msg };
   } catch (e) {
-    aiTestResult.value = { ok: false, msg: `连接失败: ${e}` };
+    aiTestResult.value = { ok: false, msg: String(e) };
   }
   testing.value = false;
 }
