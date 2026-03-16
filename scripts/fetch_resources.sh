@@ -108,8 +108,11 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   rm "$FAT_TMP/raw.tgz"
 
   # 2. npm install 生产依赖
-  echo "  安装生产依赖（npm install --omit=dev --registry=${NPM_REGISTRY}）..."
-  (cd "$FAT_TMP/package" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY")
+  echo "  安装生产依赖..."
+  # 优先使用国内源，失败则回落到 npmjs.org（部分包可能有同步延迟）
+  (cd "$FAT_TMP/package" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY") || \
+  (echo "  npmmirror 安装失败，回落到 npmjs.org..." && \
+   cd "$FAT_TMP/package" && npm install --omit=dev --no-audit --no-fund --registry="https://registry.npmjs.org")
 
   # 2.5. 预置第三方插件（qqbot 等）
   EXTENSIONS_DIR="$FAT_TMP/package/extensions"

@@ -698,18 +698,8 @@ fn install_skill_system_deps(config: &DeployConfig, window: &Window) {
     let tools_dest = PathBuf::from(&config.install_path).join("tools");
     std::fs::create_dir_all(&tools_dest).ok();
 
-    // 1. 尝试从 Bundled 资源释放（Full Bundle 模式）
-    let tools_src = match &config.source_mode {
-        SourceMode::Bundled => {
-            // Tauri 资源目录下的 tools/（由 CI 构建时嵌入）
-            // 运行时路径：与 node 二进制同级的 ../tools/
-            let node_dir = PathBuf::from(&config.install_path).join("node");
-            // Full Bundle 的 tools 可能在 resources/binaries/{platform}/tools/ 被 include_bytes
-            // 但静态二进制太大不适合 include_bytes，改为部署时从安装包旁释放
-            None::<PathBuf>
-        }
-        _ => None,
-    };
+    // TODO: Full Bundle 模式未来可从 Tauri 资源目录释放预置的静态工具二进制
+    // 目前静态工具太大（~100MB+），不适合 include_bytes 嵌入
 
     // 2. 检查已存在的工具
     let mut installed = Vec::new();
