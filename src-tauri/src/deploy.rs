@@ -1234,6 +1234,7 @@ mod tests {
         assert!(matches!(config.source_mode, SourceMode::LocalZip(_)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_validate_install_path_rejects_root() {
         let err = validate_install_path("/").unwrap_err();
@@ -1252,12 +1253,14 @@ mod tests {
         assert!(err.to_string().contains("非法字符"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_validate_install_path_accepts_valid() {
         // /tmp 存在且可写，空间充足
         assert!(validate_install_path("/tmp/openclaw_test_install").is_ok());
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_validate_install_path_rejects_dotdot_bypass() {
         // /usr/lib/../../etc 规范化后等于 /etc，应被黑名单拦截
@@ -1271,6 +1274,7 @@ mod tests {
         assert_eq!(normalize_path(std::path::Path::new("/opt/./openclaw")), std::path::PathBuf::from("/opt/openclaw"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_validate_install_path_rejects_usr() {
         let err = validate_install_path("/usr").unwrap_err();
