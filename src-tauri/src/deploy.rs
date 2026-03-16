@@ -308,9 +308,12 @@ async fn do_deploy(config: &DeployConfig, window: &Window) -> Result<()> {
         }
     }
 
-    // Step 4.7: 为 extensions 安装缺失的依赖（pnpm 优先）
+    // Step 4.7: 为 extensions 安装缺失的依赖
     let _ = window.emit("deploy:log", "检查插件依赖…");
     install_plugin_dependencies(config, window);
+
+    // Step 4.8: 安装 Skills 所需的系统工具
+    install_skill_system_deps(window);
 
     // Step 5: 写入主配置
     emit_progress(window, 5, TOTAL, "写入配置文件…");
@@ -683,6 +686,94 @@ fn install_plugin_dependencies(config: &DeployConfig, window: &Window) {
 
     let _ = window.emit("deploy:log",
         format!("插件依赖: {} 安装 / {} 跳过 / {} 总计", installed, skipped, total));
+}
+
+/// 安装 Skills 所需的系统工具（Linux apt）
+/// 这些是官方 Skills 的 runtime requirements 中可在 Linux 上通过 apt 安装的工具
+fn install_skill_system_deps(window: &Window) {
+    #[cfg(not(target_os = "linux"))]
+    { let _ = window; return; }
+
+    #[cfg(target_os = "linux")]
+    {
+        // bin名 → apt 包名（仅收录跨平台可用、apt 有包的工具）
+        const BIN_TO_APT: &[(&str, &str)] = &[
+            ("curl",    "curl"),
+            ("jq",      "jq"),
+            ("rg",      "ripgrep"),
+            ("tmux",    "tmux"),
+            ("ffmpeg",  "ffmpeg"),
+            ("gh",      "gh"),
+            ("python3", "python3"),
+            ("git",     "git"),
+        ];
+
+        // 检测哪些还没装
+        let missing: Vec<&str> = BIN_TO_APT.iter()
+            .filter(|(bin, _)| {
+                std::process::Command::new("which").arg(bin)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status().map(|s| !s.success()).unwrap_or(true)
+            })
+            .map(|(_, pkg)| *pkg)
+            .collect();
+
+        if missing.is_empty() {
+            let _ = window.emit("deploy:log", "Skills 系统依赖已就绪");
+            return;
+        }
+
+        let _ = window.emit("deploy:log",
+            format!("安装 Skills 系统依赖: {}…", missing.join(", ")));
+
+        // gh 需要先添加 GitHub CLI apt 源
+        if missing.contains(&"gh") {
+            let _ = std::process::Command::new("bash").args(["-c",
+                "type -p curl >/dev/null || (apt-get update && apt-get install -y curl) && \
+                 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
+                 dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null && \
+                 echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main' | \
+                 tee /etc/apt/sources.list.d/github-cli.list > /dev/null"
+            ]).status();
+        }
+
+        // apt-get install
+        let elevated = crate::system_check::is_elevated();
+        let mut args: Vec<&str> = vec!["apt-get", "install", "-y"];
+        args.extend(missing.iter());
+
+        let result = if elevated {
+            std::process::Command::new("apt-get")
+                .args(["install", "-y"])
+                .args(&missing)
+                .env("DEBIAN_FRONTEND", "noninteractive")
+                .output()
+        } else {
+            // 非 root：尝试 sudo（可能没有免密权限，失败不阻断）
+            std::process::Command::new("sudo")
+                .args(["apt-get", "install", "-y"])
+                .args(&missing)
+                .env("DEBIAN_FRONTEND", "noninteractive")
+                .output()
+        };
+
+        match result {
+            Ok(out) if out.status.success() => {
+                let _ = window.emit("deploy:log", "Skills 系统依赖安装完成");
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let _ = window.emit("deploy:log",
+                    format!("系统依赖部分安装失败（非致命，可手动安装）: {}",
+                        stderr.lines().last().unwrap_or("")));
+            }
+            Err(e) => {
+                let _ = window.emit("deploy:log",
+                    format!("系统依赖安装跳过（非致命）: {}", e));
+            }
+        }
+    }
 }
 
 /// 在部署的 node 中定位自带的 npm-cli.js
