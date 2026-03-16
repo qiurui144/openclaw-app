@@ -44,6 +44,9 @@ ring = "0.17"
 
 tauri = { version = "2", features = ["tray-icon"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 bundled = []
 
