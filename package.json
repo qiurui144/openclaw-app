@@ -1,7 +1,7 @@
 {
   "name": "openclaw-wizard",
   "private": true,
-  "version": "1.1.24",
+  "version": "1.1.25",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -25,10 +25,10 @@
     "@types/qrcode": "^1",
     "@vitejs/plugin-vue": "^5",
     "@vue/test-utils": "^2",
-    "happy-dom": "^14",
+    "happy-dom": "^20.8.4",
     "typescript": "^5",
-    "vite": "^5",
-    "vitest": "^1",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.0",
     "vue-tsc": "^2"
   }
 }
