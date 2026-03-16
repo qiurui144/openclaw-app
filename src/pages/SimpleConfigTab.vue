@@ -107,7 +107,7 @@ const platforms: PlatformDef[] = [
       { key: "agentId", label: "Agent ID", placeholder: "应用的 AgentId" },
       { key: "corpSecret", label: "Corp Secret", placeholder: "应用的 Secret", secret: true },
     ],
-    toConfig: (d) => ({ agent: { corpId: d.corpId, corpSecret: d.corpSecret, agentId: d.agentId } }),
+    toConfig: (d) => ({ enabled: true, agent: { corpId: d.corpId, corpSecret: d.corpSecret, agentId: d.agentId } }),
   },
   {
     key: "dingtalk", label: "钉钉", icon: "🔷", tag: "Stream 长连接",
@@ -116,7 +116,7 @@ const platforms: PlatformDef[] = [
       { key: "clientId", label: "Client ID (AppKey)", placeholder: "ding开头" },
       { key: "clientSecret", label: "Client Secret", placeholder: "应用 Secret", secret: true },
     ],
-    toConfig: (d) => ({ clientId: d.clientId, clientSecret: d.clientSecret }),
+    toConfig: (d) => ({ enabled: true, clientId: d.clientId, clientSecret: d.clientSecret }),
   },
   {
     key: "feishu", label: "飞书", icon: "🕊", tag: "WebSocket 长连接",
@@ -138,9 +138,9 @@ const platforms: PlatformDef[] = [
   },
   {
     key: "whatsapp", label: "WhatsApp", icon: "📱", tag: "扫码登录",
-    guide: "首次使用需通过 Gateway API 获取 QR 码扫码绑定手机号。",
+    guide: "启用后在终端运行 openclaw channels login --channel whatsapp 扫码绑定。无需手动填写凭据。",
     fields: [],
-    toConfig: () => ({ enabled: true }),
+    toConfig: () => ({ enabled: true, dmPolicy: "pairing" }),
   },
   {
     key: "telegram", label: "Telegram", icon: "✈",
@@ -148,25 +148,24 @@ const platforms: PlatformDef[] = [
     fields: [
       { key: "botToken", label: "Bot Token", placeholder: "123456:ABC-DEF...", secret: true },
     ],
-    toConfig: (d) => ({ botToken: d.botToken }),
+    toConfig: (d) => ({ enabled: true, botToken: d.botToken }),
   },
   {
     key: "discord", label: "Discord", icon: "🎮",
-    guide: "Discord Developer Portal → 创建 Application → Bot → 获取 Token。",
+    guide: "Discord Developer Portal → 创建 Application → Bot → 复制 Token。",
     fields: [
-      { key: "botToken", label: "Bot Token", secret: true },
-      { key: "applicationId", label: "Application ID" },
+      { key: "token", label: "Bot Token", secret: true },
     ],
-    toConfig: (d) => ({ botToken: d.botToken, applicationId: d.applicationId }),
+    toConfig: (d) => ({ enabled: true, token: d.token }),
   },
   {
     key: "slack", label: "Slack", icon: "💬",
-    guide: "api.slack.com → 创建 App → 获取 Bot Token 和 App Token。",
+    guide: "api.slack.com → 创建 App → 获取 Bot Token（xoxb-）和 App Token（xapp-）。",
     fields: [
       { key: "botToken", label: "Bot Token (xoxb-...)", secret: true },
       { key: "appToken", label: "App Token (xapp-...)", secret: true },
     ],
-    toConfig: (d) => ({ botToken: d.botToken, appToken: d.appToken }),
+    toConfig: (d) => ({ enabled: true, botToken: d.botToken, appToken: d.appToken }),
   },
   {
     key: "line", label: "LINE", icon: "🟢",
@@ -175,7 +174,7 @@ const platforms: PlatformDef[] = [
       { key: "channelAccessToken", label: "Channel Access Token", secret: true },
       { key: "channelSecret", label: "Channel Secret", secret: true },
     ],
-    toConfig: (d) => ({ channelAccessToken: d.channelAccessToken, channelSecret: d.channelSecret }),
+    toConfig: (d) => ({ enabled: true, channelAccessToken: d.channelAccessToken, channelSecret: d.channelSecret }),
   },
 ];
 

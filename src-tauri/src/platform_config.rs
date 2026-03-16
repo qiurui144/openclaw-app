@@ -75,6 +75,7 @@ fn write_platform_config_to(
     if let Some(w) = cfg.wecom {
         if !w.corp_id.is_empty() && !w.corp_secret.is_empty() && !w.agent_id.is_empty() {
             ch.insert("wecom".to_string(), serde_json::json!({
+                "enabled": true,
                 "agent": {
                     "corpId": w.corp_id,
                     "corpSecret": w.corp_secret,
@@ -88,6 +89,7 @@ fn write_platform_config_to(
     if let Some(d) = cfg.dingtalk {
         if !d.client_id.is_empty() && !d.client_secret.is_empty() {
             ch.insert("dingtalk".to_string(), serde_json::json!({
+                "enabled": true,
                 "clientId": d.client_id,
                 "clientSecret": d.client_secret,
             }));
