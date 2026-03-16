@@ -371,6 +371,7 @@ const GATEWAY_ALLOWED_KEYS: &[&str] = &[
     "messages", "tools", "skills", "plugins", "browser", "ui",
     "commands", "talk", "env", "cron", "hooks", "bindings",
     "logging", "audio",
+    "auth", "identity",
 ];
 
 fn openclaw_dir() -> Result<std::path::PathBuf, String> {
@@ -483,11 +484,12 @@ async fn get_gateway_status() -> serde_json::Value {
         .and_then(|d| serde_json::from_str::<serde_json::Value>(&d).ok())
         .unwrap_or(serde_json::json!({}));
 
-    // AI 模型：agents.defaults.model（格式 "provider/model-id"）
-    let ai_model_full = config.get("agents")
+    // AI 模型：agents.defaults.model（新格式 { primary: "provider/model" } 或旧格式纯字符串）
+    let model_val = config.get("agents")
         .and_then(|a| a.get("defaults"))
-        .and_then(|d| d.get("model"))
-        .and_then(|m| m.as_str())
+        .and_then(|d| d.get("model"));
+    let ai_model_full = model_val
+        .and_then(|m| m.get("primary").and_then(|p| p.as_str()).or_else(|| m.as_str()))
         .unwrap_or("");
     // 从 "provider/model" 格式分离 provider 和 model
     let (ai_provider, ai_model) = ai_model_full.split_once('/').unwrap_or(("", ai_model_full));
@@ -513,6 +515,7 @@ async fn get_gateway_status() -> serde_json::Value {
 
 /// 旧格式迁移：移除 openclaw.json 中非白名单的顶层 key
 /// 将旧的 ai/disabledSkills/_wizard 等移到 wizard.json 或正确位置
+/// 同时将旧的 env + models.providers.*.apiKey 格式迁移到 auth.profiles
 /// 返回是否有迁移发生
 fn migrate_legacy_config(config: &mut serde_json::Value, dir: &std::path::Path) -> bool {
     let mut migrated = false;
@@ -529,25 +532,9 @@ fn migrate_legacy_config(config: &mut serde_json::Value, dir: &std::path::Path) 
             if let Some(val) = obj.remove(key) {
                 migrated = true;
                 match key.as_str() {
-                    // 旧的顶层 ai 配置 → 迁移到 agents + env
+                    // 旧的顶层 ai 配置 → 迁移到 agents + auth.profiles
                     "ai" => {
-                        if let Some(ai_obj) = val.as_object() {
-                            let provider = ai_obj.get("provider").and_then(|v| v.as_str()).unwrap_or("");
-                            let model = ai_obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
-                            let base_url = ai_obj.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
-                            let api_key = ai_obj.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
-                            if !model.is_empty() {
-                                let model_id = if model.contains('/') { model.to_string() } else { format!("{}/{}", provider, model) };
-                                obj.insert("agents".to_string(), serde_json::json!({ "defaults": { "model": model_id } }));
-                                if !base_url.is_empty() && !api_key.is_empty() {
-                                    let env_key = format!("{}_API_KEY", provider.to_uppercase());
-                                    obj.insert("models".to_string(), serde_json::json!({
-                                        "providers": { provider: { "baseUrl": base_url, "apiKey": format!("${{{}}}", env_key) } }
-                                    }));
-                                    obj.insert("env".to_string(), serde_json::json!({ env_key: api_key }));
-                                }
-                            }
-                        }
+                        migrate_ai_to_auth_profiles(val, obj);
                     }
                     // disabledSkills / _wizard → wizard.json
                     "disabledSkills" => { wizard_patch.insert("disabledSkills".to_string(), val); }
@@ -565,23 +552,76 @@ fn migrate_legacy_config(config: &mut serde_json::Value, dir: &std::path::Path) 
         if let Some(gw) = obj.get_mut("gateway").and_then(|g| g.as_object_mut()) {
             if let Some(ai) = gw.remove("ai") {
                 migrated = true;
-                // 从 gateway.ai 迁移同上逻辑
-                if let Some(ai_obj) = ai.as_object() {
-                    let provider = ai_obj.get("provider").and_then(|v| v.as_str()).unwrap_or("");
-                    let model = ai_obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
-                    let base_url = ai_obj.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
-                    let api_key = ai_obj.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
-                    if !model.is_empty() && !obj.contains_key("agents") {
-                        let model_id = if model.contains('/') { model.to_string() } else { format!("{}/{}", provider, model) };
-                        obj.insert("agents".to_string(), serde_json::json!({ "defaults": { "model": model_id } }));
-                        if !base_url.is_empty() && !api_key.is_empty() {
-                            let env_key = format!("{}_API_KEY", provider.to_uppercase());
-                            obj.insert("models".to_string(), serde_json::json!({
-                                "providers": { provider: { "baseUrl": base_url, "apiKey": format!("${{{}}}", env_key) } }
-                            }));
-                            obj.insert("env".to_string(), serde_json::json!({ env_key: api_key }));
+                if !obj.contains_key("agents") {
+                    migrate_ai_to_auth_profiles(ai, obj);
+                }
+            }
+        }
+
+        // 迁移旧的 env + models.providers.*.apiKey 格式到 auth.profiles
+        // 检测标志：env 段存在 *_API_KEY 且 models.providers 使用 ${} 引用
+        if obj.contains_key("env") && !obj.contains_key("auth") {
+            if let Some(env_obj) = obj.get("env").and_then(|e| e.as_object()).cloned() {
+                let providers = obj.get("models")
+                    .and_then(|m| m.get("providers"))
+                    .and_then(|p| p.as_object()).cloned();
+                if let Some(providers) = providers {
+                    let mut profiles = serde_json::Map::new();
+                    let mut env_keys_consumed = Vec::new();
+                    for (prov_name, prov_val) in &providers {
+                        if let Some(prov_obj) = prov_val.as_object() {
+                            let api_key_ref = prov_obj.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+                            // 检测 ${VAR_NAME} 引用模式
+                            if api_key_ref.starts_with("${") && api_key_ref.ends_with('}') {
+                                let env_key = &api_key_ref[2..api_key_ref.len()-1];
+                                if let Some(actual_key) = env_obj.get(env_key).and_then(|v| v.as_str()) {
+                                    let profile_key = format!("{}:default", prov_name);
+                                    let mut profile = serde_json::json!({
+                                        "provider": prov_name,
+                                        "mode": "api_key",
+                                        "apiKey": actual_key,
+                                    });
+                                    if let Some(base_url) = prov_obj.get("baseUrl") {
+                                        profile["baseUrl"] = base_url.clone();
+                                    }
+                                    profiles.insert(profile_key, profile);
+                                    env_keys_consumed.push(env_key.to_string());
+                                    migrated = true;
+                                }
+                            }
                         }
                     }
+                    if !profiles.is_empty() {
+                        obj.insert("auth".to_string(), serde_json::json!({ "profiles": profiles }));
+                        // 清理已消费的 env key
+                        if let Some(env_val) = obj.get_mut("env").and_then(|e| e.as_object_mut()) {
+                            for k in &env_keys_consumed {
+                                env_val.remove(k);
+                            }
+                            if env_val.is_empty() {
+                                obj.remove("env");
+                            }
+                        }
+                        // 清理 models.providers 中的 apiKey 引用
+                        if let Some(models) = obj.get_mut("models").and_then(|m| m.get_mut("providers")).and_then(|p| p.as_object_mut()) {
+                            for prov_val in models.values_mut() {
+                                if let Some(prov_obj) = prov_val.as_object_mut() {
+                                    prov_obj.remove("apiKey");
+                                    // 如果 provider 只剩空对象，后续可保留 baseUrl
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 迁移旧的 agents.defaults.model 字符串格式到 { primary: "..." } 对象格式
+        if let Some(agents) = obj.get_mut("agents") {
+            if let Some(defaults) = agents.get_mut("defaults") {
+                if let Some(model_str) = defaults.get("model").and_then(|m| m.as_str()).map(|s| s.to_string()) {
+                    defaults["model"] = serde_json::json!({ "primary": model_str });
+                    migrated = true;
                 }
             }
         }
@@ -595,6 +635,39 @@ fn migrate_legacy_config(config: &mut serde_json::Value, dir: &std::path::Path) 
         }
     }
     migrated
+}
+
+/// 将旧的 ai 配置对象迁移到 agents + auth.profiles 格式
+fn migrate_ai_to_auth_profiles(ai: serde_json::Value, obj: &mut serde_json::Map<String, serde_json::Value>) {
+    if let Some(ai_obj) = ai.as_object() {
+        let provider = ai_obj.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+        let model = ai_obj.get("model").and_then(|v| v.as_str()).unwrap_or("");
+        let base_url = ai_obj.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
+        let api_key = ai_obj.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+        if !model.is_empty() {
+            let model_id = if model.contains('/') { model.to_string() } else { format!("{}/{}", provider, model) };
+            obj.insert("agents".to_string(), serde_json::json!({ "defaults": { "model": { "primary": model_id } } }));
+            if !api_key.is_empty() && !provider.is_empty() {
+                let profile_key = format!("{}:default", provider);
+                let mut profile = serde_json::json!({
+                    "provider": provider,
+                    "mode": "api_key",
+                    "apiKey": api_key,
+                });
+                if !base_url.is_empty() {
+                    profile["baseUrl"] = serde_json::json!(base_url);
+                }
+                obj.insert("auth".to_string(), serde_json::json!({
+                    "profiles": { profile_key: profile }
+                }));
+            }
+            if !base_url.is_empty() {
+                obj.insert("models".to_string(), serde_json::json!({
+                    "providers": { provider: { "baseUrl": base_url, "api": "openai-completions" } }
+                }));
+            }
+        }
+    }
 }
 
 /// JSON 深度合并（patch 中的值覆盖 target 对应 key，递归合并对象）

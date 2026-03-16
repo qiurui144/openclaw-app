@@ -91,6 +91,21 @@ if [[ "${1:-}" != "--node-only" ]]; then
     echo "  安装生产依赖（npm install --omit=dev --registry=${NPM_REGISTRY}）..."
     (cd "$FAT_TMP/package" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY")
 
+    # 2.5. 为自带插件安装生产依赖
+    if [ -d "$FAT_TMP/package/plugins" ]; then
+      echo "  安装插件依赖..."
+      for plugin_dir in "$FAT_TMP/package/plugins"/*/; do
+        if [ -f "$plugin_dir/package.json" ] && [ ! -d "$plugin_dir/node_modules" ]; then
+          if grep -q '"dependencies"' "$plugin_dir/package.json" 2>/dev/null; then
+            plugin_name=$(basename "$plugin_dir")
+            echo "    $plugin_name..."
+            (cd "$plugin_dir" && npm install --omit=dev --no-audit --no-fund --registry="$NPM_REGISTRY") || \
+              echo "    警告: $plugin_name 依赖安装失败（非致命）"
+          fi
+        fi
+      done
+    fi
+
     # 3. 重新打包为 fat tarball（保留 package/ 前缀以兼容 deploy 解压逻辑）
     echo "  打包 fat tarball..."
     (cd "$FAT_TMP" && tar -czf openclaw.tgz package/)

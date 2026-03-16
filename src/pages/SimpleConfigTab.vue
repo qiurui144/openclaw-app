@@ -202,10 +202,14 @@ const configuredPlatforms = ref<Set<string>>(new Set());
 onMounted(async () => {
   try {
     const cfg = await tauri.readOpenclawConfig();
-    // 加载 AI 配置（agents.defaults.model + models.providers + env）
+    // 加载 AI 配置（agents.defaults.model + auth.profiles，兼容旧 env 格式）
     const agents = cfg.agents as Record<string, unknown> | undefined;
     const defaults = agents?.defaults as Record<string, unknown> | undefined;
-    const modelFull = (defaults?.model as string) || "";
+    // model 可能是对象 { primary: "provider/model" } 或旧格式纯字符串
+    const modelRaw = defaults?.model;
+    const modelFull = typeof modelRaw === "object" && modelRaw !== null
+      ? ((modelRaw as Record<string, string>).primary || "")
+      : ((modelRaw as string) || "");
     if (modelFull) {
       const slashIdx = modelFull.indexOf("/");
       if (slashIdx > 0) {
@@ -214,17 +218,25 @@ onMounted(async () => {
       } else {
         ai.model = modelFull;
       }
-      // 读取 baseUrl 和 apiKey
+      // 读取 baseUrl（从 models.providers）
       const models = cfg.models as Record<string, unknown> | undefined;
       const providers = models?.providers as Record<string, Record<string, string>> | undefined;
       if (providers?.[ai.provider]) {
         ai.baseUrl = providers[ai.provider].baseUrl || "";
       }
-      // API Key 从 env 段读取
-      const envCfg = cfg.env as Record<string, string> | undefined;
-      const envKey = `${ai.provider.toUpperCase()}_API_KEY`;
-      if (envCfg?.[envKey]) {
-        ai.apiKey = envCfg[envKey];
+      // API Key 优先从 auth.profiles 读取（新格式）
+      const authCfg = cfg.auth as Record<string, unknown> | undefined;
+      const profiles = authCfg?.profiles as Record<string, Record<string, string>> | undefined;
+      const profileKey = `${ai.provider}:default`;
+      if (profiles?.[profileKey]) {
+        ai.apiKey = profiles[profileKey].apiKey || "";
+      } else {
+        // 回落：从旧的 env 段读取
+        const envCfg = cfg.env as Record<string, string> | undefined;
+        const envKey = `${ai.provider.toUpperCase()}_API_KEY`;
+        if (envCfg?.[envKey]) {
+          ai.apiKey = envCfg[envKey];
+        }
       }
       // 也尝试从预设 provider 匹配 baseUrl
       if (!ai.baseUrl) {
@@ -298,22 +310,25 @@ async function testAiConnection() {
 async function saveAiConfig() {
   saving.value = true;
   try {
-    // Gateway 格式：agents.defaults.model + models.providers + env
+    // Gateway 官方格式：agents.defaults.model.primary + auth.profiles
     const modelId = ai.model.includes("/") ? ai.model : `${ai.provider}/${ai.model}`;
-    const envKey = `${ai.provider.toUpperCase()}_API_KEY`;
+    const profileKey = `${ai.provider}:default`;
     const patch: Record<string, unknown> = {
-      agents: { defaults: { model: modelId } },
+      agents: { defaults: { model: { primary: modelId } } },
+      auth: {
+        profiles: {
+          [profileKey]: { provider: ai.provider, mode: "api_key", apiKey: ai.apiKey },
+        },
+      },
     };
-    if (ai.baseUrl) {
+    // 仅自定义 baseUrl 时添加 models.providers
+    const baseUrl = ai.baseUrl || AI_PROVIDERS.find(p => p.value === ai.provider)?.baseUrl || "";
+    if (baseUrl && ai.provider === "custom") {
       patch.models = {
         providers: {
-          [ai.provider]: {
-            baseUrl: ai.baseUrl,
-            apiKey: `\${${envKey}}`,
-          },
+          [ai.provider]: { baseUrl, api: "openai-completions" },
         },
       };
-      patch.env = { [envKey]: ai.apiKey };
     }
     await tauri.writeOpenclawConfig(patch);
     showSaveMsg(true, "AI 配置已保存");
