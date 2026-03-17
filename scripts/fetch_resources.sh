@@ -281,12 +281,12 @@ else echo "  Windows gh 已存在，跳过"; fi
 echo "下载 ffmpeg..."
 if [[ ! -f "$TOOLS_LINUX/ffmpeg" ]]; then
   download "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" /tmp/ffmpeg_linux.tar.xz
-  # 先列出目录名再提取（兼容 macOS bsdtar，无 --wildcards）
-  FFMPEG_DIR=$(tar -tJf /tmp/ffmpeg_linux.tar.xz | head -1 | cut -d/ -f1)
-  tar -xJf /tmp/ffmpeg_linux.tar.xz -C /tmp "${FFMPEG_DIR}/ffmpeg"
-  mv "/tmp/${FFMPEG_DIR}/ffmpeg" "$TOOLS_LINUX/ffmpeg"
+  # 解压到临时目录，找到 ffmpeg 二进制
+  mkdir -p /tmp/ffmpeg_extract
+  tar -xJf /tmp/ffmpeg_linux.tar.xz -C /tmp/ffmpeg_extract
+  find /tmp/ffmpeg_extract -maxdepth 2 -name "ffmpeg" -type f -exec mv {} "$TOOLS_LINUX/ffmpeg" \;
   chmod +x "$TOOLS_LINUX/ffmpeg"
-  rm -rf /tmp/ffmpeg_linux.tar.xz "/tmp/${FFMPEG_DIR}"
+  rm -rf /tmp/ffmpeg_linux.tar.xz /tmp/ffmpeg_extract
 else echo "  Linux ffmpeg 已存在，跳过"; fi
 if [[ ! -f "$TOOLS_WIN/ffmpeg.exe" ]]; then
   download "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" /tmp/ffmpeg_win.zip
